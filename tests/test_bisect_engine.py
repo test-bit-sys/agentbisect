@@ -184,7 +184,7 @@ def test_bisect_engine_non_monotonic_trajectory_detection(temp_workspace):
     engine = BisectEngine(
         session=recorder.session,
         ledger=recorder.ledger,
-        test_command=f'"{sys.executable}" test_flag.py',
+        test_command=f'"{sys.executable}" -B test_flag.py',
         timeout_seconds=10,
     )
     report = engine.run(verify_monotonicity=True)

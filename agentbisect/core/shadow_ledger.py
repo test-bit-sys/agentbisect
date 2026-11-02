@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import contextlib
 import os
+import shutil
 import subprocess
 import time
 from pathlib import Path
@@ -202,6 +203,39 @@ class ShadowLedger:
             raise ValueError(f"Step {step_number} not found in shadow ledger.")
         self.restore_commit(commit)
 
+    def _clean_ephemeral_bytecode(self) -> None:
+        """
+        Safely removes ephemeral __pycache__ directories created during test evaluations.
+        Guarantees that:
+        - .git and .agentbisect directories are never entered or touched.
+        - Symlinks are never followed or traversed.
+        - Files outside workspace are never deleted.
+        - Filesystem errors (e.g. PermissionError on open file handles) are caught safely without masking bugs.
+        - Non-Python artifact directories (e.g. node_modules, .venv) are skipped for performance.
+        """
+        skip_dirs = {".git", ".agentbisect", "node_modules", ".venv", "venv"}
+        try:
+            for root, dirs, _ in os.walk(str(self.workspace_root), followlinks=False):
+                filtered_dirs: List[str] = []
+                for d in dirs:
+                    dir_path = os.path.join(root, d)
+                    if d in skip_dirs or os.path.islink(dir_path):
+                        continue
+                    if d == "__pycache__":
+                        if not os.path.islink(dir_path):
+                            try:
+                                resolved = Path(dir_path).resolve()
+                                resolved.relative_to(self.workspace_root)
+                                shutil.rmtree(dir_path, ignore_errors=False)
+                            except (OSError, ValueError):
+                                # Tolerates transient file locks or paths outside workspace
+                                pass
+                    else:
+                        filtered_dirs.append(d)
+                dirs[:] = filtered_dirs
+        except OSError:
+            pass
+
     def restore_commit(self, commit_hash: str) -> None:
         """Restores workspace files to a specific commit hash safely preserving user .git."""
         # Clean untracked files (except excluded) and checkout commit
@@ -216,6 +250,7 @@ class ShadowLedger:
             "-e", "AGENT_FORK_PROMPT.md",
             "-e", "agentbisect_report.html",
         ])
+        self._clean_ephemeral_bytecode()
 
     def get_step_diff(self, step_number: int) -> str:
         """Returns the git diff introduced at this specific step."""

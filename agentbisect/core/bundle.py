@@ -7,6 +7,7 @@ for reproducible collaboration and issue reporting.
 from __future__ import annotations
 
 import json
+import ntpath
 import os
 import shutil
 import tempfile
@@ -93,8 +94,19 @@ class BundleManager:
                     raise ValueError(f"Unsafe symlink entry detected in bundle: {info.filename}")
 
                 norm_name = os.path.normpath(info.filename.replace("\\", "/"))
-                # Disallow Windows drive letters (e.g. C:foo) and path traversals
-                if os.path.splitdrive(norm_name)[0] or os.path.isabs(norm_name) or norm_name.startswith("..") or ("../" in info.filename) or ("..\\" in info.filename):
+                # Disallow Windows drive letters (e.g. C:foo, C:\foo) and path traversals across all platforms
+                has_drive = bool(
+                    ntpath.splitdrive(norm_name)[0]
+                    or ntpath.splitdrive(info.filename)[0]
+                    or os.path.splitdrive(norm_name)[0]
+                )
+                if (
+                    has_drive
+                    or os.path.isabs(norm_name)
+                    or norm_name.startswith("..")
+                    or ("../" in info.filename)
+                    or ("..\\" in info.filename)
+                ):
                     raise ValueError(f"Path traversal detected in bundle entry: {info.filename}")
 
                 dest = (target_ws / norm_name).resolve()

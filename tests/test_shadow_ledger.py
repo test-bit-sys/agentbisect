@@ -265,3 +265,59 @@ def test_shadow_ledger_stash_and_restore_zero_initial_commits(temp_workspace):
     ledger.restore_stash(parent_commit=None)
     assert draft.exists()
     assert draft.read_text(encoding="utf-8") == "important uncommitted work\n"
+
+def test_shadow_ledger_cleans_ephemeral_pycache_across_rapid_checkouts(temp_workspace):
+    """
+    Regression test: When switching between commits that contain different versions
+    of a Python file with identical file size in rapid succession, restore_step
+    must clean ephemeral __pycache__ so the restored source is executed rather
+    than stale bytecode compiled during a previous step's evaluation.
+    Also verifies symlinks and .git/.agentbisect directories are never touched.
+    """
+    import subprocess
+    import sys
+
+    ledger = ShadowLedger(temp_workspace)
+    flag_py = temp_workspace / "flag.py"
+
+    # Step 1: Version 1 (size = 8 bytes)
+    flag_py.write_text("val = 1\n", encoding="utf-8")
+    commit_1 = ledger.snapshot_step(1, summary="Step 1: val = 1")
+
+    # Step 2: Version 2 (size = 8 bytes, same size)
+    flag_py.write_text("val = 5\n", encoding="utf-8")
+    commit_2 = ledger.snapshot_step(2, summary="Step 2: val = 5")
+
+    # Simulate evaluating Step 2 by importing flag.py (compiles __pycache__/flag.*.pyc)
+    p2 = subprocess.run(
+        [sys.executable, "-c", "import flag; assert flag.val == 5"],
+        cwd=str(temp_workspace),
+        capture_output=True,
+        text=True,
+    )
+    assert p2.returncode == 0, f"Step 2 evaluation failed: {p2.stderr}"
+    pycache_dir = temp_workspace / "__pycache__"
+    assert pycache_dir.exists(), "__pycache__ should exist after import"
+
+    # Rapidly restore Step 1
+    ledger.restore_step(1)
+
+    # __pycache__ must be purged by restore_commit
+    assert not pycache_dir.exists(), "__pycache__ was not cleaned during restore_step"
+
+    # Execute flag.py without -B; it must execute the restored version (val == 1)
+    p1 = subprocess.run(
+        [sys.executable, "-c", "import flag; assert flag.val == 1"],
+        cwd=str(temp_workspace),
+        capture_output=True,
+        text=True,
+    )
+    assert p1.returncode == 0, f"Stale bytecode loaded! Step 1 failed assertion: {p1.stderr}"
+
+    # Verify .agentbisect and .git protected directories are never touched
+    protected_marker = temp_workspace / ".agentbisect" / "protected_cache.txt"
+    protected_marker.write_text("immutable metadata", encoding="utf-8")
+    ledger.restore_step(2)
+    assert protected_marker.exists()
+    assert protected_marker.read_text(encoding="utf-8") == "immutable metadata"
+

@@ -96,19 +96,20 @@ def test_bundle_excludes_lock_files_and_uses_posix_paths(temp_workspace):
 
 def test_bundle_import_rejects_windows_drive_traversal(temp_workspace):
     """
-    Security test: Bundle containing Windows drive-letter paths (e.g. C:payload.txt)
-    must be rejected as path traversal.
+    Security test: Bundle containing Windows drive-letter paths (e.g. C:payload.txt, C:\\payload.txt)
+    must be rejected as path traversal across all operating systems.
     """
     import zipfile
-    drive_zip = temp_workspace / "drive_traversal.zip"
-    with zipfile.ZipFile(drive_zip, "w") as z:
-        z.writestr("C:escape.txt", "payload")
+    for i, bad_path in enumerate(["C:escape.txt", "C:\\escape.txt", "D:/escape.txt", "c:payload.txt"]):
+        drive_zip = temp_workspace / f"drive_traversal_{i}.zip"
+        with zipfile.ZipFile(drive_zip, "w") as z:
+            z.writestr(bad_path, "payload")
 
-    target_ws = temp_workspace / "target_drive"
-    target_ws.mkdir()
+        target_ws = temp_workspace / f"target_drive_{i}"
+        target_ws.mkdir()
 
-    with pytest.raises(ValueError, match="Path traversal detected in bundle entry"):
-        BundleManager.import_bundle(drive_zip, target_ws)
+        with pytest.raises(ValueError, match="Path traversal detected in bundle entry"):
+            BundleManager.import_bundle(drive_zip, target_ws)
 
 
 def test_bundle_import_rejects_duplicate_entries(temp_workspace):
