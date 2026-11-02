@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/test-bit-sys/agentbisect/actions"><img src="https://img.shields.io/badge/tests-15%20passed-brightgreen?style=for-the-badge&logo=pytest" alt="Tests"></a>
+  <a href="https://github.com/test-bit-sys/agentbisect/actions"><img src="https://img.shields.io/badge/tests-69%20passed-brightgreen?style=for-the-badge&logo=pytest" alt="Tests"></a>
   <a href="https://github.com/test-bit-sys/agentbisect/stargazers"><img src="https://img.shields.io/github/stars/test-bit-sys/agentbisect?style=for-the-badge&color=yellow" alt="Stars"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?style=for-the-badge" alt="License"></a>
   <a href="https://pypi.org/project/agentbisect/"><img src="https://img.shields.io/badge/pypi-v0.1.0-blueviolet?style=for-the-badge&logo=pypi" alt="PyPI"></a>
@@ -149,6 +149,37 @@ Add to your MCP configuration (`claude_desktop_config.json` or Cursor Settings):
 | `agentbisect_rewind` | `target_step`, `hint?` | Rewinds workspace and generates recovery prompt |
 | `agentbisect_get_diff` | `step_number` | Retrieves unified git diff of any step |
 | `agentbisect_status` | *none* | Returns active session metadata and step count |
+
+---
+
+## 🛡️ Reliability & Correctness Guarantees
+
+AI agent trajectories often break traditional debugging assumptions. `AgentBisect` incorporates formal reliability boundaries:
+
+### 1. Explicit Regression Oracle
+Every test evaluation distinguishes between:
+- **`PASS`**: Exit code 0, test assertions satisfied.
+- **`FAIL`**: Non-zero exit code indicating code assertion failure.
+- **`INCONCLUSIVE`**: Command timed out or process hung without deterministic conclusion.
+- **`ERROR`**: Infrastructure/environment defect (missing binary, permissions, OS failure). Infrastructure errors are **never conflated with code regressions**.
+
+### 2. Non-Monotonic Trajectory Detection
+Agents often introduce a bug at step $k$, partially patch it at step $m$, and break something else at step $n$. `AgentBisect` automatically monitors and detects non-monotonic inversions:
+- **`CONFIRMED_FIRST_REGRESSION`** (95–99% confidence): Monotonicity holds, step $k-1$ passed, step $k$ failed.
+- **`PROBABLE_FIRST_REGRESSION`** (80–90% confidence): Boundary identified with skipped unverified steps.
+- **`EARLIEST_OBSERVED_FAILURE`** (65% confidence): Non-monotonic trajectory detected; identifies the earliest observed failure while highlighting that subsequent steps passed.
+- **`INCONCLUSIVE`**: Infrastructure failures or flapping tests prevented deterministic diagnosis.
+
+### 3. Flaky Test Mitigation & Stability Policies
+Run tests with configurable retries (`--retries N`) and stability policies (`--stability-policy majority` or `require_all_pass`). Intermittent failures are never hidden; all execution attempts are recorded with timestamps, exit codes, and stdout/stderr.
+
+### 4. Transactional Workspace Restoration
+During bisection, files are safely evaluated. Your working tree—including uncommitted changes and untracked files—is transactionally stashed and **guaranteed to be restored** upon completion or keyboard interrupt. User `.git` directories and configurations are strictly protected from deletion.
+
+### 5. Hardened Security & Isolation
+- **Zip-Slip Protection**: Evidence bundle import validates every archive path against path traversal attacks (`../`), disallowing arbitrary file overwrites and symlinks outside `.agentbisect/`.
+- **Advisory File Locking**: High-concurrency environments use atomic file locks (`agentbisect.lock`) to prevent concurrent ledger corruption between CLI, MCP, and Web UI.
+- **Atomic Persistence**: Session metadata writes use atomic rename replacement to eliminate partial file corruption.
 
 ---
 

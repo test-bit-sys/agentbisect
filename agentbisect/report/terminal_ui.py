@@ -86,15 +86,19 @@ class TerminalUI:
         # Culprit Panel
         culprit_title = f"[bold red]>> Culprit Identified: Step #{bad_step.step_number}[/bold red]"
         culprit_body = [
+            f"[bold white]Classification:[/bold white] [bold cyan]{report.classification.value}[/bold cyan] ([bold green]{int(report.confidence * 100)}% confidence[/bold green])",
             f"[bold white]Action:[/bold white] {bad_step.summary()}",
             f"[bold white]Files Affected:[/bold white] {', '.join(bad_step.files_affected) if bad_step.files_affected else 'None'}",
             f"[bold white]Divergence Reason:[/bold white] [red]{report.divergence_reason}[/red]",
             f"[bold white]Last Known Good State:[/bold white] [green]Step #{good_step.step_number if good_step else 0}[/green]",
         ]
+        if report.non_monotonic_detected:
+            culprit_body.append("[bold red]Notice:[/bold red] Non-monotonic trajectory detected (bug was subsequently fixed or multiple regressions occurred).")
+
         console.print(Panel("\n".join(culprit_body), title=culprit_title, border_style="red"))
 
         # Evaluations Table
-        table = Table(title="[bold cyan]Binary Search Evaluations[/bold cyan]", border_style="dim")
+        table = Table(title="[bold cyan]Search Evaluations[/bold cyan]", border_style="dim")
         table.add_column("Order", justify="center", style="dim")
         table.add_column("Step #", justify="center", style="bold")
         table.add_column("Commit", justify="center", style="cyan")
@@ -107,8 +111,14 @@ class TerminalUI:
                 st = "[green]PASS[/green]"
             elif eval_res.step_number == bad_step.step_number:
                 st = "[bold red]FIRST BAD [!][/bold red]"
-            else:
+            elif eval_res.status == BisectStatus.FAIL:
                 st = "[red]FAIL[/red]"
+            else:
+                st = f"[yellow]{eval_res.status.value}[/yellow]"
+
+            if eval_res.is_flaky:
+                st += " [yellow](FLAKY)[/yellow]"
+
             table.add_row(
                 str(idx),
                 str(eval_res.step_number),
@@ -118,6 +128,11 @@ class TerminalUI:
                 f"{eval_res.duration_seconds}s",
             )
         console.print(table)
+
+        # Engine Diagnostics Panel
+        if report.diagnostics:
+            diag_text = "\n".join(f"- {d}" for d in report.diagnostics)
+            console.print(Panel(diag_text, title="[bold yellow]Engine Diagnostics & Observations[/bold yellow]", border_style="yellow"))
 
         # Waste Estimate Panel
         if report.waste_estimate:

@@ -57,3 +57,7 @@ Issues = "https://github.com/test-bit-sys/agentbisect/issues"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["agentbisect*"]
+
+[tool.pytest.ini_options]
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]

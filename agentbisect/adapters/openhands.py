@@ -25,12 +25,12 @@ class OpenHandsAdapter(BaseAdapter):
     def can_handle(cls, file_path: Path) -> bool:
         if not file_path.is_file():
             return False
-        if "openhands" in file_path.name.lower() or "trajectory" in file_path.name.lower():
+        if "openhands" in file_path.name.lower():
             return True
         try:
             with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
                 head = f.read(1024)
-                if '"action":' in head and ('"args":' in head or '"action_type":' in head):
+                if ('"action":' in head or '"action_type":' in head) and ('"args":' in head or '"parameters":' in head):
                     return True
         except Exception:
             pass

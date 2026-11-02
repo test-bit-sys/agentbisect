@@ -87,12 +87,31 @@ class HTMLReportGenerator:
 
         culprit_banner = ""
         if report.is_found():
+            non_mono_alert = ""
+            if report.non_monotonic_detected:
+                non_mono_alert = '<p style="color: #fca5a5; font-weight: bold; margin-top: 0.5rem;">⚠️ Non-monotonic trajectory detected: regressions were fixed later or multiple regressions occurred.</p>'
+
+            diag_html = ""
+            if report.diagnostics:
+                diag_items = "".join(f"<li>{html.escape(d)}</li>" for d in report.diagnostics)
+                diag_html = f'<div style="margin-top: 0.8rem; font-size: 0.9rem; color: #cbd5e1;"><strong>Diagnostics:</strong><ul style="margin-left: 1.2rem; margin-top: 0.3rem;">{diag_items}</ul></div>'
+
             culprit_banner = f"""
             <div class="alert-culprit">
                 <h2>🎯 First Broken Step Located: Step #{bad_num}</h2>
+                <p><strong>Classification:</strong> <span style="color: var(--accent); font-weight: bold;">{html.escape(report.classification.value)}</span> ({int(report.confidence * 100)}% confidence)</p>
                 <p><strong>Action:</strong> {html.escape(report.first_bad_step.summary())}</p>
                 <p><strong>Divergence Reason:</strong> {html.escape(report.divergence_reason or '')}</p>
                 <p><strong>Last Good State:</strong> Step #{good_num}</p>
+                {non_mono_alert}
+                {diag_html}
+            </div>
+            """
+        elif report.divergence_reason:
+            culprit_banner = f"""
+            <div class="alert-culprit" style="border-color: var(--card-border); background: var(--card-bg);">
+                <h2>Notice: {html.escape(report.classification.value)}</h2>
+                <p>{html.escape(report.divergence_reason)}</p>
             </div>
             """
 

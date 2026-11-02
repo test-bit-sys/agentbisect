@@ -35,3 +35,20 @@ def test_agent_setup_cline():
         target_file = ws / ".cline" / "mcp.json"
         assert target_file.exists()
         assert "agentbisect" in data["mcpServers"]
+
+
+def test_agent_setup_claude_snippet():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        ws = Path(tmpdir)
+        written, msg, data = AgentSetupManager.setup_claude(ws, write=False)
+        assert "agentbisect" in data["mcpServers"]
+        assert data["mcpServers"]["agentbisect"]["command"] == "agentbisect"
+
+
+def test_agent_setup_windsurf_snippet():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        ws = Path(tmpdir)
+        written, msg, data = AgentSetupManager.setup_windsurf(ws, write=False)
+        assert "agentbisect" in data["mcpServers"]
+        assert data["mcpServers"]["agentbisect"]["command"] == "agentbisect"
+

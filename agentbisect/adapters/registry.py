@@ -31,8 +31,10 @@ def list_registered_adapters() -> List[str]:
 
 
 def detect_adapter(file_path: Path) -> Optional[Type[BaseAdapter]]:
-    """Finds the first registered adapter capable of handling the file."""
-    for adapter_cls in _REGISTRY.values():
+    """Finds the first registered adapter capable of handling the file, prioritizing specific formats over generic fallback."""
+    specific = [cls for name, cls in _REGISTRY.items() if name != "generic_json"]
+    fallback = [cls for name, cls in _REGISTRY.items() if name == "generic_json"]
+    for adapter_cls in specific + fallback:
         try:
             if adapter_cls.can_handle(file_path):
                 return adapter_cls

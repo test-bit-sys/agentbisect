@@ -48,3 +48,15 @@ def test_fork_engine_rollback_and_prompt(temp_workspace):
     assert "Step 1" in prompt_text
     assert "Step 2" in prompt_text
     assert "Preserve the clean return statement" in prompt_text
+
+
+def test_fork_engine_invalid_step(temp_workspace):
+    recorder = LiveRecorder(temp_workspace, session_id="test_fork_invalid")
+    f = temp_workspace / "code.py"
+    f.write_text("x = 1\n", encoding="utf-8")
+    recorder.record_step(tool_name="write_file")
+
+    fork_engine = ForkEngine(recorder.session, recorder.ledger)
+    with pytest.raises(ValueError, match="does not exist in session"):
+        fork_engine.fork_to_step(target_step_num=99)
+

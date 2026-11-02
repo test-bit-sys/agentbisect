@@ -7,7 +7,7 @@ from __future__ import annotations
 import re
 import time
 from pathlib import Path
-from agentbisect.core.models import BisectStatus, BisectStepResult
+from agentbisect.core.models import BisectStatus, BisectStepResult, EvaluationAttempt
 from agentbisect.evaluators.base import BaseEvaluator
 
 
@@ -51,17 +51,31 @@ class RegexEvaluator(BaseEvaluator):
             except Exception:
                 continue
 
-        duration = time.time() - start_time
+        duration = round(time.time() - start_time, 3)
         passed = (found == self.should_match)
         status = BisectStatus.PASS if passed else BisectStatus.FAIL
+        msg_out = f"Pattern '{self.required_regex.pattern}' found: {found}"
+        msg_err = "" if passed else f"Regex expectation failed for {self.target_file_pattern}"
+        exit_code = 0 if passed else 1
+
+        attempt = EvaluationAttempt(
+            attempt_number=1,
+            status=status,
+            exit_code=exit_code,
+            stdout=msg_out,
+            stderr=msg_err,
+            duration_seconds=duration,
+        )
 
         return BisectStepResult(
             step_number=step_number,
             commit_hash=commit_hash,
             status=status,
-            exit_code=0 if passed else 1,
-            stdout=f"Pattern '{self.required_regex.pattern}' found: {found}",
-            stderr="" if passed else f"Regex expectation failed for {self.target_file_pattern}",
-            duration_seconds=round(duration, 3),
+            exit_code=exit_code,
+            stdout=msg_out,
+            stderr=msg_err,
+            duration_seconds=duration,
             command=f"regex:{self.required_regex.pattern}",
+            attempts=[attempt],
+            is_flaky=False,
         )
