@@ -70,3 +70,125 @@ def test_bisect_engine_identifies_exact_culprit(temp_workspace):
     assert report.last_good_step.step_number == 5
     assert report.waste_estimate.wasted_steps == 5  # steps 6, 7, 8, 9, 10
     assert report.evaluations_count <= 6  # logarithmic bound O(log2 N)
+    assert report.classification.value == "CONFIRMED_FIRST_REGRESSION"
+    assert report.confidence >= 0.95
+
+    # Verification: workspace MUST be restored to latest state (step 10)
+    extra_10 = temp_workspace / "extra_10.py"
+    assert extra_10.exists(), "Workspace was not restored to the latest state upon completion!"
+
+
+def test_bisect_engine_preconditions(temp_workspace):
+    from agentbisect.core.models import AgentSession, SessionMetadata
+
+    # Empty session
+    empty_session = AgentSession(
+        metadata=SessionMetadata(session_id="empty", workspace_root=str(temp_workspace)),
+        steps=[],
+    )
+    from agentbisect.core.shadow_ledger import ShadowLedger
+    ledger = ShadowLedger(temp_workspace)
+
+    engine = BisectEngine(
+        session=empty_session,
+        ledger=ledger,
+        test_command="python -c 'exit(0)'",
+    )
+    with pytest.raises(ValueError, match="Session contains no steps"):
+        engine.run()
+
+
+def test_bisect_engine_invalid_bounds(temp_workspace):
+    recorder = LiveRecorder(temp_workspace, session_id="bounds_test")
+    f = temp_workspace / "file.txt"
+    f.write_text("v1", encoding="utf-8")
+    recorder.record_step(tool_name="write_file")
+
+    engine = BisectEngine(
+        session=recorder.session,
+        ledger=recorder.ledger,
+        test_command="python -c 'exit(0)'",
+    )
+    # known_good >= known_bad is invalid
+    report = engine.run(known_good=5, known_bad=2)
+    assert report.classification.value == "INCONCLUSIVE"
+    assert "Invalid ordering" in report.divergence_reason
+
+
+def test_bisect_engine_restores_uncommitted_worktree_changes(temp_workspace):
+    recorder = LiveRecorder(temp_workspace, session_id="stash_test")
+    app = temp_workspace / "app.py"
+    test_f = temp_workspace / "test_app.py"
+
+    app.write_text("x = 1\n", encoding="utf-8")
+    test_f.write_text("import app\nassert app.x == 1\n", encoding="utf-8")
+    recorder.record_step(tool_name="write_file")
+
+    app.write_text("x = 99\n", encoding="utf-8")
+    recorder.record_step(tool_name="edit_file")
+
+    # Now create an uncommitted dirty file in workspace before bisect
+    dirty_file = temp_workspace / "dirty_user_edit.txt"
+    dirty_file.write_text("crucial user work in progress", encoding="utf-8")
+
+    engine = BisectEngine(
+        session=recorder.session,
+        ledger=recorder.ledger,
+        test_command=f'"{sys.executable}" test_app.py',
+    )
+    report = engine.run()
+    assert report.is_found()
+    assert report.first_bad_step.step_number == 2
+
+    # Verify uncommitted file is preserved intact
+    assert dirty_file.exists(), "User uncommitted work was deleted by bisect!"
+    assert dirty_file.read_text(encoding="utf-8") == "crucial user work in progress"
+
+
+def test_bisect_engine_non_monotonic_trajectory_detection(temp_workspace):
+    """
+    Trajectory:
+    Step 1: PASS (x = 1)
+    Step 2: FAIL (x = 2) -> bug introduced
+    Step 3: PASS (x = 1) -> bug fixed!
+    Step 4: PASS (x = 1)
+    Step 5: FAIL (x = 5) -> new bug introduced
+    Non-monotonic inversion: Step 2 failed, but later Step 3/4 passed.
+    """
+    recorder = LiveRecorder(temp_workspace, session_id="non_monotonic_session")
+    code = temp_workspace / "flag.py"
+    test_script = temp_workspace / "test_flag.py"
+
+    test_script.write_text("import flag\nassert flag.val == 1\n", encoding="utf-8")
+
+    # Step 1: PASS
+    code.write_text("val = 1\n", encoding="utf-8")
+    recorder.record_step(tool_name="write_file")
+
+    # Step 2: FAIL
+    code.write_text("val = 2\n", encoding="utf-8")
+    recorder.record_step(tool_name="edit_file")
+
+    # Step 3: PASS (fixed)
+    code.write_text("val = 1\n", encoding="utf-8")
+    recorder.record_step(tool_name="edit_file")
+
+    # Step 4: PASS
+    code.write_text("val = 1\n# extra\n", encoding="utf-8")
+    recorder.record_step(tool_name="edit_file")
+
+    # Step 5: FAIL (broken again)
+    code.write_text("val = 5\n", encoding="utf-8")
+    recorder.record_step(tool_name="edit_file")
+
+    engine = BisectEngine(
+        session=recorder.session,
+        ledger=recorder.ledger,
+        test_command=f'"{sys.executable}" test_flag.py',
+        timeout_seconds=10,
+    )
+    report = engine.run(verify_monotonicity=True)
+    assert report.non_monotonic_detected is True
+    assert report.classification.value == "EARLIEST_OBSERVED_FAILURE"
+    assert any("Non-monotonic trajectory inversion" in d for d in report.diagnostics)
+

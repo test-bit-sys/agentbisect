@@ -314,9 +314,11 @@ def create_handler_class(workspace_root: Path | str = "."):
                     pane.innerHTML = `
                         <div style="background: rgba(249, 115, 22, 0.15); border: 2px solid var(--orange); border-radius: 8px; padding: 1.5rem; margin-bottom: 1.5rem;">
                             <h2 style="color: var(--orange);">🎯 Culprit Located: Step #${report.first_bad_step.step_number}</h2>
+                            <p style="margin: 0.5rem 0;"><strong>Classification:</strong> <span style="color: var(--accent);">${report.classification}</span> (${Math.round((report.confidence || 1) * 100)}% confidence)</p>
                             <p style="margin: 0.5rem 0;"><strong>Action:</strong> ${report.first_bad_step.tool_name}</p>
                             <p style="margin: 0.5rem 0;"><strong>Divergence Reason:</strong> ${report.divergence_reason}</p>
                             <p style="margin: 0.5rem 0;"><strong>Last Good State:</strong> Step #${report.last_good_step ? report.last_good_step.step_number : 0}</p>
+                            ${report.non_monotonic_detected ? '<p style="color: var(--red); font-weight: bold; margin-top: 0.5rem;">⚠️ Non-monotonic trajectory detected!</p>' : ''}
                             <button class="btn btn-fork" style="margin-top: 1rem;" onclick="forkStep(${report.last_good_step ? report.last_good_step.step_number : 0})">Rewind to Last Good Step</button>
                         </div>
                     `;

@@ -34,3 +34,35 @@ def test_bundle_export_and_import(temp_workspace):
         assert imported_session.metadata.session_id == "bundle_test_session"
         assert len(imported_session.steps) == 1
         assert (Path(target_dir) / ".agentbisect" / "current_session.json").exists()
+
+
+def test_bundle_import_rejects_path_traversal(temp_workspace):
+    import zipfile
+
+    malicious_zip = temp_workspace / "evil.zip"
+    with zipfile.ZipFile(malicious_zip, "w") as z:
+        # Create an entry with path traversal attempt
+        z.writestr("../../../malicious_file.txt", "pwned")
+
+    target_ws = temp_workspace / "target"
+    target_ws.mkdir()
+
+    with pytest.raises(ValueError, match="Path traversal detected"):
+        BundleManager.import_bundle(malicious_zip, target_ws)
+
+    # Ensure file was not written outside workspace
+    assert not (temp_workspace.parent / "malicious_file.txt").exists()
+
+
+def test_bundle_import_rejects_files_outside_agentbisect(temp_workspace):
+    import zipfile
+
+    unsafe_zip = temp_workspace / "unsafe.zip"
+    with zipfile.ZipFile(unsafe_zip, "w") as z:
+        z.writestr("src/main.py", "malicious_payload = True")
+
+    target_ws = temp_workspace / "target"
+    target_ws.mkdir()
+
+    with pytest.raises(ValueError, match="Bundle contains file outside .agentbisect"):
+        BundleManager.import_bundle(unsafe_zip, target_ws)

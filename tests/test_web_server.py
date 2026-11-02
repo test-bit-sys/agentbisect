@@ -64,6 +64,30 @@ def test_web_ui_endpoints(temp_workspace):
             html_text = resp.read().decode("utf-8")
             assert "AgentBisect Dashboard" in html_text
 
+        # Test POST /api/bisect
+        bisect_req = urllib.request.Request(
+            f"{base_url}/api/bisect",
+            data=json.dumps({"test_command": "python -c 'exit(0)'"}).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(bisect_req) as resp:
+            assert resp.status == 200
+            bisect_data = json.loads(resp.read().decode("utf-8"))
+            assert "classification" in bisect_data
+            assert "session_id" in bisect_data
+
+        # Test POST /api/fork
+        fork_req = urllib.request.Request(
+            f"{base_url}/api/fork",
+            data=json.dumps({"target_step": 1, "hint": "test hint"}).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(fork_req) as resp:
+            assert resp.status == 200
+            fork_data = json.loads(resp.read().decode("utf-8"))
+            assert fork_data["forked_step_number"] == 1
+            assert "prompt_file_path" in fork_data
+
     finally:
         server.shutdown()
         server.server_close()

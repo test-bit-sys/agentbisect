@@ -43,6 +43,7 @@ def main():
 @click.option("--workspace", "-w", type=click.Path(exists=True), default=".", help="Workspace root directory.")
 @click.option("--timeout", type=int, default=60, help="Timeout in seconds per test run.")
 @click.option("--retries", "-r", type=int, default=1, help="Retry attempts for flaky test handling (default: 1).")
+@click.option("--stability-policy", type=click.Choice(["majority", "require_all_pass"]), default="majority", help="Flaky test evaluation policy.")
 @click.option("--strategy", "-s", type=click.Choice(["binary", "heuristic"]), default="binary", help="Search strategy (default: binary).")
 @click.option("--html/--no-html", default=True, help="Generate HTML report (default: True).")
 @click.option("--open/--no-open", "open_browser", default=False, help="Open HTML report in browser automatically.")
@@ -52,6 +53,7 @@ def find_cmd(
     workspace: str,
     timeout: int,
     retries: int,
+    stability_policy: str,
     strategy: str,
     html: bool,
     open_browser: bool,
@@ -87,7 +89,7 @@ def find_cmd(
     console.print(f"[bold cyan]Workspace:[/bold cyan] {ws_path}")
     console.print(f"[bold cyan]Transcript:[/bold cyan] {trans_path}")
     console.print(f"[bold cyan]Test Command:[/bold cyan] [yellow]{test_command}[/yellow]")
-    console.print(f"[bold cyan]Strategy:[/bold cyan] [white]{strategy}[/white] | [bold cyan]Retries:[/bold cyan] [white]{retries}[/white]\n")
+    console.print(f"[bold cyan]Strategy:[/bold cyan] [white]{strategy}[/white] | [bold cyan]Retries:[/bold cyan] [white]{retries}[/white] | [bold cyan]Stability:[/bold cyan] [white]{stability_policy}[/white]\n")
 
     # Load session
     session = load_session(trans_path, ws_path)
@@ -103,12 +105,18 @@ def find_cmd(
 
     console.print("\n[bold cyan]Starting search across steps...[/bold cyan]")
 
+    from agentbisect.evaluators.command import CommandEvaluator
+    evaluator = CommandEvaluator(
+        command=test_command,
+        timeout_seconds=timeout,
+        retries=retries,
+        stability_policy=stability_policy,
+    )
+
     engine = BisectEngine(
         session=session,
         ledger=ledger,
-        test_command=test_command,
-        timeout_seconds=timeout,
-        retries=retries,
+        evaluator=evaluator,
         strategy=strategy,
         on_step_evaluated=TerminalUI.print_bisect_step_evaluated,
     )
@@ -122,12 +130,15 @@ def find_cmd(
         try:
             with open(gh_summary, "a", encoding="utf-8") as f:
                 f.write(f"\n## ⚡ AgentBisect Result for `{test_command}`\n")
+                f.write(f"- **Classification:** {report.classification.value} ({int(report.confidence * 100)}%)\n")
                 if report.is_found():
                     f.write(f"- **First Broken Step:** Step #{report.first_bad_step.step_number}\n")
                     f.write(f"- **Divergence Reason:** {report.divergence_reason}\n")
                     f.write(f"- **Last Known Good:** Step #{report.last_good_step.step_number if report.last_good_step else 0}\n")
                 else:
                     f.write(f"- {report.divergence_reason}\n")
+                if report.diagnostics:
+                    f.write(f"- **Diagnostics:** {'; '.join(report.diagnostics)}\n")
         except Exception:
             pass
 
@@ -137,6 +148,11 @@ def find_cmd(
         console.print(f"\n[bold green][OK] Interactive HTML Report generated:[/bold green] {report_file}")
         if open_browser:
             webbrowser.open(report_file.as_uri())
+
+    from agentbisect.core.models import RegressionClassification
+    if report.classification in (RegressionClassification.INCONCLUSIVE, RegressionClassification.BROKEN_BASELINE):
+        sys.exit(2)
+    sys.exit(0)
 
 
 @main.command(name="fork")

@@ -5,8 +5,10 @@ Manages isolated, non-polluting versioning of agent workspace states without aff
 
 from __future__ import annotations
 
+import contextlib
 import os
 import subprocess
+import time
 from pathlib import Path
 from typing import List, Optional, Tuple
 from agentbisect.core.models import AgentStep, StepType
@@ -29,6 +31,44 @@ class ShadowLedger:
         self.git_dir = self.ledger_dir
         self.work_tree = self.workspace_root
         self._init_shadow_repo()
+
+    @contextlib.contextmanager
+    def lock(self, timeout_seconds: float = 10.0):
+        """Cross-platform advisory file lock for atomic shadow ledger operations."""
+        lock_file = self.ledger_dir / "agentbisect.lock"
+        self.ledger_dir.mkdir(parents=True, exist_ok=True)
+        start = time.time()
+        acquired = False
+        lock_fd = None
+        try:
+            while time.time() - start < timeout_seconds:
+                try:
+                    lock_fd = os.open(str(lock_file), os.O_CREAT | os.O_EXCL | os.O_RDWR)
+                    os.write(lock_fd, f"{os.getpid()}\n".encode("utf-8"))
+                    acquired = True
+                    break
+                except FileExistsError:
+                    try:
+                        mtime = lock_file.stat().st_mtime
+                        if time.time() - mtime > 60:
+                            lock_file.unlink(missing_ok=True)
+                            continue
+                    except OSError:
+                        pass
+                    time.sleep(0.05)
+            if not acquired:
+                raise TimeoutError(f"Could not acquire shadow ledger lock on {lock_file} within {timeout_seconds}s")
+            yield
+        finally:
+            if acquired and lock_fd is not None:
+                try:
+                    os.close(lock_fd)
+                except OSError:
+                    pass
+                try:
+                    lock_file.unlink(missing_ok=True)
+                except OSError:
+                    pass
 
     def _run_git(
         self,
@@ -82,7 +122,7 @@ class ShadowLedger:
             info_exclude = self.git_dir / "info" / "exclude"
             info_exclude.parent.mkdir(parents=True, exist_ok=True)
             with open(info_exclude, "w", encoding="utf-8") as f:
-                f.write(".agentbisect/\n__pycache__/\nnode_modules/\n.git/\n")
+                f.write(".agentbisect/\n.agentbisect/**\n__pycache__/\nnode_modules/\n.git/\n.git/**\n")
 
     def snapshot_step(
         self,
@@ -94,30 +134,38 @@ class ShadowLedger:
         Creates a commit in the shadow repo representing the exact state at this step.
         Returns the commit hash.
         """
-        # Add files to index
-        if files:
-            # Add specific files
-            existing_files = [f for f in files if (self.workspace_root / f).exists()]
-            if existing_files:
-                self._run_git(["add"] + existing_files)
-        else:
-            # Add all workspace files (respecting exclude)
-            self._run_git(["add", "-A"])
+        with self.lock():
+            # Add files to index
+            if files:
+                # Add specific files
+                existing_files = [f for f in files if (self.workspace_root / f).exists()]
+                if existing_files:
+                    self._run_git(["add"] + existing_files)
+            else:
+                # Add all workspace files (respecting exclude)
+                self._run_git(["add", "-A"])
 
-        msg = f"Step {step_number}: {summary}" if summary else f"Step {step_number}"
-        # Commit with --allow-empty so every step is recorded even if file didn't change
-        res = self._run_git(["commit", "--allow-empty", "-m", msg])
-        # Get latest commit hash
-        hash_res = self._run_git(["rev-parse", "HEAD"])
-        commit_hash = hash_res.stdout.strip()
+            msg = f"Step {step_number}: {summary}" if summary else f"Step {step_number}"
+            # Commit with --allow-empty so every step is recorded even if file didn't change
+            res = self._run_git(["commit", "--allow-empty", "-m", msg])
+            # Get latest commit hash
+            hash_res = self._run_git(["rev-parse", "HEAD"])
+            commit_hash = hash_res.stdout.strip()
 
-        # Tag this step for quick reference: step-1, step-2, etc.
-        self._run_git(["tag", "-f", f"step-{step_number}", commit_hash])
-        return commit_hash
+            # Tag this step for quick reference: step-1, step-2, etc.
+            self._run_git(["tag", "-f", f"step-{step_number}", commit_hash])
+            return commit_hash
 
     def get_commit_for_step(self, step_number: int) -> Optional[str]:
         """Resolves the commit hash for a given step tag."""
         res = self._run_git(["rev-parse", f"step-{step_number}"], check=False)
+        if res.returncode == 0:
+            return res.stdout.strip()
+        return None
+
+    def get_current_head(self) -> Optional[str]:
+        """Resolves current HEAD commit hash if repository has any commits."""
+        res = self._run_git(["rev-parse", "HEAD"], check=False)
         if res.returncode == 0:
             return res.stdout.strip()
         return None
@@ -130,11 +178,17 @@ class ShadowLedger:
         self.restore_commit(commit)
 
     def restore_commit(self, commit_hash: str) -> None:
-        """Restores workspace files to a specific commit hash."""
+        """Restores workspace files to a specific commit hash safely preserving user .git."""
         # Clean untracked files (except excluded) and checkout commit
         self._run_git(["checkout", "-f", commit_hash])
-        # Clean any files that shouldn't exist at this commit
-        self._run_git(["clean", "-fd", "-e", ".agentbisect"])
+        # Clean any files that shouldn't exist at this commit while protecting critical directories
+        self._run_git([
+            "clean", "-fd",
+            "-e", ".agentbisect",
+            "-e", ".agentbisect/**",
+            "-e", ".git",
+            "-e", ".git/**"
+        ])
 
     def get_step_diff(self, step_number: int) -> str:
         """Returns the git diff introduced at this specific step."""
@@ -177,28 +231,40 @@ class ShadowLedger:
 
     def create_initial_baseline(self) -> str:
         """Creates an initial baseline commit before any steps run."""
-        self._run_git(["add", "-A"])
-        self._run_git(["commit", "--allow-empty", "-m", "AgentBisect Baseline"])
-        hash_res = self._run_git(["rev-parse", "HEAD"])
-        commit_hash = hash_res.stdout.strip()
-        self._run_git(["tag", "-f", "baseline", commit_hash])
-        return commit_hash
+        with self.lock():
+            self._run_git(["add", "-A"])
+            self._run_git(["commit", "--allow-empty", "-m", "AgentBisect Baseline"])
+            hash_res = self._run_git(["rev-parse", "HEAD"])
+            commit_hash = hash_res.stdout.strip()
+            self._run_git(["tag", "-f", "baseline", commit_hash])
+            return commit_hash
 
     def stash_worktree(self) -> bool:
         """Stashes any uncommitted working tree changes into a temporary shadow tag."""
-        res = self._run_git(["status", "--porcelain"])
-        if not res.stdout.strip():
-            return False  # Worktree was clean
+        with self.lock():
+            res = self._run_git(["status", "--porcelain"])
+            if not res.stdout.strip():
+                return False  # Worktree was clean
 
-        self._run_git(["add", "-A"])
-        self._run_git(["commit", "--allow-empty", "-m", "AgentBisect Pre-Run Stash"])
-        hash_res = self._run_git(["rev-parse", "HEAD"])
-        self._run_git(["tag", "-f", "stash_backup", hash_res.stdout.strip()])
-        return True
+            self._run_git(["add", "-A"])
+            self._run_git(["commit", "--allow-empty", "-m", "AgentBisect Pre-Run Stash"])
+            hash_res = self._run_git(["rev-parse", "HEAD"])
+            self._run_git(["tag", "-f", "stash_backup", hash_res.stdout.strip()])
+            return True
 
-    def restore_stash(self) -> None:
-        """Restores the stashed working tree changes."""
-        stash_res = self._run_git(["rev-parse", "stash_backup"], check=False)
-        if stash_res.returncode == 0:
-            self.restore_commit(stash_res.stdout.strip())
-            self._run_git(["tag", "-d", "stash_backup"], check=False)
+    def restore_stash(self, parent_commit: Optional[str] = None) -> None:
+        """Restores the stashed working tree changes and resets shadow index."""
+        with self.lock():
+            stash_res = self._run_git(["rev-parse", "stash_backup"], check=False)
+            if stash_res.returncode == 0:
+                stash_commit = stash_res.stdout.strip()
+                parent = parent_commit
+                if not parent:
+                    p_res = self._run_git(["rev-parse", "stash_backup^"], check=False)
+                    if p_res.returncode == 0:
+                        parent = p_res.stdout.strip()
+                self.restore_commit(stash_commit)
+                self._run_git(["tag", "-d", "stash_backup"], check=False)
+                if parent:
+                    self._run_git(["reset", parent], check=False)
+

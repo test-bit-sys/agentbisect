@@ -5,6 +5,8 @@ Data models and schemas for AgentBisect.
 from __future__ import annotations
 
 import json
+import os
+import uuid
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
@@ -31,6 +33,16 @@ class BisectStatus(str, Enum):
     SKIP = "SKIP"
     UNTESTED = "UNTESTED"
     ERROR = "ERROR"
+    INCONCLUSIVE = "INCONCLUSIVE"
+
+
+class RegressionClassification(str, Enum):
+    CONFIRMED = "CONFIRMED_FIRST_REGRESSION"
+    PROBABLE = "PROBABLE_FIRST_REGRESSION"
+    EARLIEST_OBSERVED = "EARLIEST_OBSERVED_FAILURE"
+    INCONCLUSIVE = "INCONCLUSIVE"
+    NO_REGRESSION = "NO_REGRESSION"
+    BROKEN_BASELINE = "BROKEN_BASELINE"
 
 
 class AgentStep(BaseModel):
@@ -94,10 +106,19 @@ class AgentSession(BaseModel):
         return None
 
     def save_json(self, path: Path | str) -> None:
-        p = Path(path)
+        p = Path(path).resolve()
         p.parent.mkdir(parents=True, exist_ok=True)
-        with open(p, "w", encoding="utf-8") as f:
-            f.write(self.model_dump_json(indent=2))
+        tmp_path = p.with_name(f"{p.name}.{uuid.uuid4().hex[:8]}.tmp")
+        try:
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                f.write(self.model_dump_json(indent=2))
+            os.replace(tmp_path, p)
+        finally:
+            if tmp_path.exists():
+                try:
+                    tmp_path.unlink()
+                except OSError:
+                    pass
 
     @classmethod
     def load_json(cls, path: Path | str) -> AgentSession:
@@ -105,6 +126,16 @@ class AgentSession(BaseModel):
         with open(p, "r", encoding="utf-8") as f:
             data = json.load(f)
         return cls.model_validate(data)
+
+
+class EvaluationAttempt(BaseModel):
+    """Details of a single execution attempt of an evaluator."""
+    attempt_number: int
+    status: BisectStatus
+    exit_code: int
+    stdout: str = ""
+    stderr: str = ""
+    duration_seconds: float = 0.0
 
 
 class BisectStepResult(BaseModel):
@@ -117,6 +148,8 @@ class BisectStepResult(BaseModel):
     stderr: str
     duration_seconds: float
     command: str
+    attempts: List[EvaluationAttempt] = Field(default_factory=list)
+    is_flaky: bool = False
 
 
 class WasteEstimate(BaseModel):
@@ -139,6 +172,10 @@ class BisectReport(BaseModel):
     waste_estimate: Optional[WasteEstimate] = None
     suggested_fork_prompt: Optional[str] = None
     divergence_reason: Optional[str] = None
+    classification: RegressionClassification = RegressionClassification.NO_REGRESSION
+    confidence: float = 1.0
+    non_monotonic_detected: bool = False
+    diagnostics: List[str] = Field(default_factory=list)
 
     def is_found(self) -> bool:
         return self.first_bad_step is not None

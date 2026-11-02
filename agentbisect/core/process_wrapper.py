@@ -34,20 +34,34 @@ class ProcessWrapper:
         cmd_str = " ".join(command_args) if isinstance(command_args, (list, tuple)) else str(command_args)
         summary = step_summary or f"run_command: {cmd_str[:35]}"
 
-        # On POSIX (Linux/macOS), subprocess with shell=True and a sequence argument drops all args after the first.
-        # Use shell=False for argument sequences on POSIX, while retaining shell=True for Windows or string commands.
-        use_shell = (sys.platform == "win32") or isinstance(command_args, str)
+        # Avoid shell=True for argument sequences where possible to prevent injection,
+        # but permit fallback for Windows shell built-ins (e.g. dir, type, copy).
+        use_shell = isinstance(command_args, str)
 
         start_time = time.time()
-        proc = subprocess.run(
-            command_args,
-            cwd=str(self.workspace_root),
-            shell=use_shell,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-        )
+        try:
+            proc = subprocess.run(
+                command_args,
+                cwd=str(self.workspace_root),
+                shell=use_shell,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+            )
+        except FileNotFoundError:
+            if sys.platform == "win32" and not use_shell:
+                proc = subprocess.run(
+                    command_args,
+                    cwd=str(self.workspace_root),
+                    shell=True,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                )
+            else:
+                raise
         duration_ms = int((time.time() - start_time) * 1000)
 
         # Print outputs to console
