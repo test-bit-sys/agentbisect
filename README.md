@@ -88,10 +88,29 @@ pip install -e .
 
 ---
 
+## 🔌 10-Second Setup on ANY Agent
+
+`AgentBisect` can automatically configure itself for your preferred agent with a single command:
+
+```bash
+# 🎯 1-Click Auto Configuration:
+agentbisect setup --agent cursor --write       # Configures .cursor/mcp.json
+agentbisect setup --agent antigravity --write  # Installs skill in .gemini/skills/
+agentbisect setup --agent claude --write       # Configures Claude Desktop
+agentbisect setup --agent cline --write        # Configures .cline/mcp.json
+agentbisect setup --agent windsurf --write     # Configures Windsurf MCP
+
+# Or view snippets for all agents without writing:
+agentbisect setup
+```
+
+---
+
 ## 🛠️ CLI Quick Reference
 
 | Command | Description |
 | :--- | :--- |
+| `agentbisect setup --agent <name>` | Automatically configure MCP server & skills for any agent |
 | `agentbisect find "<test_cmd>"` | Binary search across agent steps to locate regression step |
 | `agentbisect fork <step_num>` | Rewind workspace to `<step_num>` and generate `AGENT_FORK_PROMPT.md` |
 | `agentbisect ui` | Launch the local web UI dashboard with interactive visual diffs |

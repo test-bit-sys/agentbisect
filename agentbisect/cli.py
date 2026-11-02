@@ -4,6 +4,7 @@ Command Line Interface (CLI) for AgentBisect.
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 import tempfile
@@ -18,6 +19,7 @@ from agentbisect.core.bundle import BundleManager
 from agentbisect.core.doctor import SystemDoctor
 from agentbisect.core.fork_engine import ForkEngine
 from agentbisect.core.models import AgentSession
+from agentbisect.core.setup_helper import AgentSetupManager
 from agentbisect.core.shadow_ledger import ShadowLedger
 from agentbisect.core.process_wrapper import ProcessWrapper
 from agentbisect.demo.scenarios import setup_demo_environment
@@ -327,6 +329,68 @@ def bundle_import_cmd(bundle_path: str, target_dir: str):
     except Exception as e:
         console.print(f"[bold red]Import failed:[/bold red] {e}")
         sys.exit(1)
+
+
+@main.command(name="setup")
+@click.option(
+    "--agent",
+    "-a",
+    type=click.Choice(["cursor", "claude", "antigravity", "cline", "windsurf", "all"], case_sensitive=False),
+    default="all",
+    help="Target agent to configure (cursor, claude, antigravity, cline, windsurf, or all).",
+)
+@click.option(
+    "--write/--no-write",
+    default=False,
+    help="Automatically write/update configuration files in workspace or user directory.",
+)
+@click.option(
+    "--workspace",
+    "-w",
+    type=click.Path(exists=True),
+    default=".",
+    help="Workspace root directory.",
+)
+def setup_cmd(agent: str, write: bool, workspace: str):
+    """Automatically configure AgentBisect MCP server and skills for any AI agent."""
+    TerminalUI.print_banner()
+    ws_path = Path(workspace).resolve()
+    target = agent.lower()
+
+    console.print(f"[bold cyan]Configuring AgentBisect for:[/bold cyan] [bold yellow]{target.upper()}[/bold yellow] (Auto-write to disk: [white]{write}[/white])\n")
+
+    if target in ("cursor", "all"):
+        written, msg, data = AgentSetupManager.setup_cursor(ws_path, write=write)
+        status_tag = "[bold green][OK][/bold green]" if written else "[bold cyan][CONFIG][/bold cyan]"
+        console.print(f"{status_tag} [bold white]Cursor MCP (.cursor/mcp.json):[/bold white] {msg}")
+        console.print("```json\n" + json.dumps(data, indent=2) + "\n```\n")
+
+    if target in ("antigravity", "all"):
+        written, msg, content = AgentSetupManager.setup_antigravity(ws_path, write=write)
+        status_tag = "[bold green][OK][/bold green]" if written else "[bold cyan][CONFIG][/bold cyan]"
+        console.print(f"{status_tag} [bold white]Google Antigravity Skill (.gemini/skills/agentbisect/):[/bold white] {msg}\n")
+
+    if target in ("claude", "all"):
+        written, msg, data = AgentSetupManager.setup_claude(ws_path, write=write)
+        status_tag = "[bold green][OK][/bold green]" if written else "[bold cyan][CONFIG][/bold cyan]"
+        console.print(f"{status_tag} [bold white]Claude Desktop:[/bold white] {msg}")
+        console.print("```json\n" + json.dumps(data, indent=2) + "\n```\n")
+
+    if target in ("cline", "all"):
+        written, msg, data = AgentSetupManager.setup_cline(ws_path, write=write)
+        status_tag = "[bold green][OK][/bold green]" if written else "[bold cyan][CONFIG][/bold cyan]"
+        console.print(f"{status_tag} [bold white]Cline MCP (.cline/mcp.json):[/bold white] {msg}")
+        console.print("```json\n" + json.dumps(data, indent=2) + "\n```\n")
+
+    if target in ("windsurf", "all"):
+        written, msg, data = AgentSetupManager.setup_windsurf(ws_path, write=write)
+        status_tag = "[bold green][OK][/bold green]" if written else "[bold cyan][CONFIG][/bold cyan]"
+        console.print(f"{status_tag} [bold white]Windsurf MCP:[/bold white] {msg}")
+        console.print("```json\n" + json.dumps(data, indent=2) + "\n```\n")
+
+    if not write:
+        console.print("[yellow]Tip: Pass [bold]--write[/bold] to write config files directly to your workspace:[/yellow]")
+        console.print("  [cyan]agentbisect setup --agent cursor --write[/cyan]\n")
 
 
 if __name__ == "__main__":
