@@ -19,7 +19,7 @@ I built **AgentBisect**, a local-first CLI and MCP server that brings determinis
 - **Context Forking:** It rolls back the filesystem to the last good step and synthesizes an `AGENT_FORK_PROMPT.md` containing the diff and failure trace so the agent can resume with corrective guidance.
 - **MCP Server:** Built-in stdio Model Context Protocol server allowing agents to call `agentbisect_bisect` and self-heal.
 
-GitHub repo: https://github.com/your-username/agentbisect  
+GitHub repo: https://github.com/test-bit-sys/agentbisect  
 License: MIT.
 
 ---
@@ -66,4 +66,4 @@ One of the largest bottlenecks in autonomous agent evaluation is that once an ag
 3. Automatically computes divergence root cause and token waste metrics.
 4. Exposes MCP tools (`agentbisect_snapshot`, `agentbisect_bisect`, `agentbisect_rewind`) so local LLMs (like Llama 3.3, Qwen 2.5 Coder) can inspect and bisect their own execution history.
 
-Check out the repo: https://github.com/your-username/agentbisect
+Check out the repo: https://github.com/test-bit-sys/agentbisect

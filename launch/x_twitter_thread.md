@@ -67,6 +67,6 @@ agentbisect demo
 ```
 
 ⭐ Star the repo on GitHub:
-https://github.com/your-username/agentbisect
+https://github.com/test-bit-sys/agentbisect
 
 Retweet the first tweet if you're tired of resetting agent sessions! 🔁

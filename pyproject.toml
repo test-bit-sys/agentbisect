@@ -48,6 +48,12 @@ dev = [
 [project.scripts]
 agentbisect = "agentbisect.cli:main"
 
+[project.urls]
+Homepage = "https://github.com/test-bit-sys/agentbisect"
+Documentation = "https://github.com/test-bit-sys/agentbisect#readme"
+Repository = "https://github.com/test-bit-sys/agentbisect.git"
+Issues = "https://github.com/test-bit-sys/agentbisect/issues"
+
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["agentbisect*"]

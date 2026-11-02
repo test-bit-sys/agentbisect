@@ -4,7 +4,7 @@
 `Show HN: AgentBisect – Git bisect for autonomous AI coding agents`
 
 **Target URL:**
-`https://github.com/your-username/agentbisect`
+`https://github.com/test-bit-sys/agentbisect`
 
 ---
 

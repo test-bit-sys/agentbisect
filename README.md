@@ -1,50 +1,36 @@
-# ⚡ AgentBisect
+<p align="center">
+  <img src="assets/logo.png" alt="AgentBisect Logo" width="180" style="border-radius: 24px; box-shadow: 0 8px 32px rgba(56, 189, 248, 0.25);" />
+</p>
+
+<h1 align="center">⚡ AgentBisect</h1>
 
 <p align="center">
-  <pre>
-   ___                    __   ____  _               __ 
-  / _ | ___ ____ ___  ___/ /_ / __ )(_)__ ___  ____/ /_
- / __ |/ _ `/ -_) _ \/ _  // / /_/ / (_-</ -_)/ __/ __/
-/_/ |_|\_, /\__/_//_/\_,_/___/_____/_/___/\__/\__/\__/  
-      /___/                                             
-  </pre>
-  <b>Git bisect for AI coding agents.</b><br>
+  <b>Git Bisect & Time-Travel Debugging for Autonomous AI Coding Agents.</b><br>
   <i>Stop restarting 40-step agent sessions from scratch. Pinpoint, diff, and fork the exact step where your agent broke the codebase.</i>
 </p>
 
 <p align="center">
-  <a href="https://github.com/your-username/agentbisect/actions"><img src="https://img.shields.io/badge/tests-passing-brightgreen?style=flat-square" alt="Tests"></a>
-  <a href="https://pypi.org/project/agentbisect/"><img src="https://img.shields.io/badge/pypi-v0.1.0-blue?style=flat-square" alt="PyPI"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="License"></a>
-  <a href="#"><img src="https://img.shields.io/badge/supports-Claude_Code_|_Cursor_|_Antigravity_|_Aider-blueviolet?style=flat-square" alt="Compatible Agents"></a>
+  <a href="https://github.com/test-bit-sys/agentbisect/actions"><img src="https://img.shields.io/badge/tests-15%20passed-brightgreen?style=for-the-badge&logo=pytest" alt="Tests"></a>
+  <a href="https://github.com/test-bit-sys/agentbisect/stargazers"><img src="https://img.shields.io/github/stars/test-bit-sys/agentbisect?style=for-the-badge&color=yellow" alt="Stars"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?style=for-the-badge" alt="License"></a>
+  <a href="https://pypi.org/project/agentbisect/"><img src="https://img.shields.io/badge/pypi-v0.1.0-blueviolet?style=for-the-badge&logo=pypi" alt="PyPI"></a>
+  <a href="#"><img src="https://img.shields.io/badge/MCP-Compatible-orange?style=for-the-badge" alt="MCP Ready"></a>
 </p>
 
 ---
 
 ## 💥 The Problem: "Compounding Agent Drift"
 
-When you ask an autonomous coding agent (Claude Code, Cursor Agent, Antigravity, Devin, Aider) to implement a feature or refactor a module, it often takes **20 to 50 sequential steps** (tool calls, file edits, bash commands).
+When you ask an autonomous coding agent (**Claude Code**, **Cursor Agent**, **Google Antigravity**, **Devin**, **Cline**, or **Aider**) to implement a multi-file feature or perform a large refactor, it executes **20 to 50 sequential steps** (tool calls, file edits, bash commands).
 
 Inevitably:
-1. At **Step 12**, the agent makes a subtle semantic error (e.g. inverts a condition or changes a function signature).
-2. Steps **13 to 40** are spent in **compounding hallucinations**, writing broken patches on top of broken assumptions.
+1. At **Step 12**, the agent makes a subtle semantic error (e.g., inverts an authorization check or changes a function signature).
+2. Steps **13 to 40** turn into **compounding hallucinations**, writing broken patches on top of invalid assumptions.
 3. At the end of the session, the test suite is completely broken.
 
 Today, developers face a frustrating dilemma:
-- **Guess manually** by reading a 2,000-line JSON transcript.
-- Or run `git checkout .` — **wasting 40,000+ API tokens, $1.50+, and 30 minutes of time.**
-
----
-
-## 🚀 The Solution: `AgentBisect`
-
-`AgentBisect` brings the power of **Git Bisect and Time-Travel Trajectory Debugging** to the AI Agent era:
-
-1. **Non-Polluting Shadow Git Ledger:** Automatically tracks workspace checkpoints in `.agentbisect/` without cluttering your real `git log` or touching your branches.
-2. **Binary Search Trajectory Engine (`agentbisect find`):** Locates the exact first broken step in $\mathcal{O}(\log_2 N)$ test executions (5 runs for 32 steps).
-3. **Workspace & Context Forking (`agentbisect fork <step>`):** Rewinds your filesystem to the last verified good step and synthesizes an intelligent post-mortem prompt (`AGENT_FORK_PROMPT.md`) for the agent to resume with guidance.
-4. **Self-Healing MCP Server & Skill:** Agents can bisect themselves via Model Context Protocol tools!
-5. **Interactive HTML Dashboard:** Generates a standalone, beautiful HTML timeline report with visual step trees, side-by-side diffs, and token waste calculations.
+- **Guess manually** by reading through a 2,000-line JSON transcript.
+- Or run `git checkout .` — **wasting 40,000+ API tokens, $1.50+ in costs, and 30 minutes of waiting.**
 
 ```
  Traditional:  [Step 1] ────────────────► [Step 12: BUG] ────────────────► [Step 40: FAIL] ❌
@@ -53,6 +39,19 @@ Today, developers face a frustrating dilemma:
  AgentBisect:  [Step 1] ───► [Step 12: FIRST BAD] ───► [Step 11: FORK HERE] ───► [SUCCESS] ✅
                └─── Bisect isolated Step 12 in 5 test runs! Saved 28k tokens!
 ```
+
+---
+
+## 🚀 The Solution: `AgentBisect`
+
+`AgentBisect` brings deterministic binary search and time-travel trajectory debugging to AI coding agents:
+
+1. **Non-Polluting Shadow Git Ledger:** Automatically snapshots workspace checkpoints inside `.agentbisect/shadow_git/` without polluting your real `.git` log or creating unwanted branches.
+2. **Binary Search Trajectory Engine (`agentbisect find`):** Locates the exact first broken step in $\mathcal{O}(\log_2 N)$ test executions (just 5 test runs for 32 steps).
+3. **Workspace & Context Forking (`agentbisect fork <step>`):** Rewinds your filesystem to the last verified good step and synthesizes an intelligent post-mortem prompt (`AGENT_FORK_PROMPT.md`) for the agent to resume without repeating the error.
+4. **Self-Healing MCP Server & Skill:** Agents running inside Cursor, Claude Desktop, or Antigravity can invoke `agentbisect_bisect` to autonomously debug and rewind themselves.
+5. **Interactive Local Web Dashboard (`agentbisect ui`):** Full-featured dark-mode web dashboard with visual step graphs, side-by-side diffs, and token waste analytics.
+6. **Zero-Overhead Portable Evidence Bundles (`agentbisect bundle export/import`):** Package faulty sessions as `.bisect.zip` for instant sharing and post-mortem review.
 
 ---
 
@@ -65,76 +64,51 @@ pip install agentbisect
 agentbisect demo
 ```
 
-This launches a pre-packaged simulation of a 20-step microservice agent session, runs the binary search live in your terminal, catches the exact line inverted at Step 12, and produces an interactive HTML report!
+*(Also supports Node.js microservices via `agentbisect demo --lang node`)*
+
+This launches a pre-packaged simulation of an autonomous agent session, executes binary search live in your terminal, pinpoints the exact line broken at Step 12, and produces an interactive HTML report!
 
 ---
 
 ## 📦 Installation
 
+Install via pip:
+
 ```bash
 pip install agentbisect
 ```
 
-Or install from source:
+Or install latest from source:
+
 ```bash
-git clone https://github.com/your-username/agentbisect.git
+git clone https://github.com/test-bit-sys/agentbisect.git
 cd agentbisect
 pip install -e .
 ```
 
 ---
 
-## 🛠️ CLI Usage
+## 🛠️ CLI Quick Reference
 
-### 1. Find the Culprit Step
-Run binary search over your agent's session against any test or validation command:
-
-```bash
-# Using pytest
-agentbisect find "pytest tests/"
-
-# Using npm
-agentbisect find "npm test"
-
-# Specify a transcript file explicitly
-agentbisect find "pytest" --transcript .claude/session.jsonl
-```
-
-### 2. Fork and Rewind
-Rewind your workspace to the last good step and generate a post-mortem prompt:
-
-```bash
-agentbisect fork 11 --hint "Avoid modifying the token expiration comparison."
-```
-
-This creates `AGENT_FORK_PROMPT.md`:
-```markdown
-# AgentBisect Session Fork Notice
-**Action Taken:** Workspace rewound to Step 11.
-- At Step 12, 'edit_file(auth.py)' broke the test with:
-  AssertionError: Expired token should not verify
-- Guidance: Avoid modifying the token expiration comparison.
-```
-
-### 3. Real-Time Flight Recorder
-Record steps manually or in scripts:
-
-```bash
-agentbisect snapshot "Completed database migration"
-```
-
-### 4. Inspect Session Status
-```bash
-agentbisect status
-```
+| Command | Description |
+| :--- | :--- |
+| `agentbisect find "<test_cmd>"` | Binary search across agent steps to locate regression step |
+| `agentbisect fork <step_num>` | Rewind workspace to `<step_num>` and generate `AGENT_FORK_PROMPT.md` |
+| `agentbisect ui` | Launch the local web UI dashboard with interactive visual diffs |
+| `agentbisect snapshot "<msg>"` | Create an immediate shadow git snapshot of current workspace |
+| `agentbisect wrap "<cmd>"` | Execute command transparently and auto-record a shadow step |
+| `agentbisect doctor` | Run pre-flight environment, dependency, and permission diagnostics |
+| `agentbisect bundle export` | Package current session into a portable `.bisect.zip` bundle |
+| `agentbisect bundle import <pkg>`| Import and inspect a `.bisect.zip` evidence bundle |
+| `agentbisect mcp` | Launch the stdio Model Context Protocol (MCP) server |
 
 ---
 
-## 🤖 MCP Server & Self-Healing Agent Skill
+## 🤖 MCP Server Setup (Self-Healing Agent)
 
-`AgentBisect` includes a built-in **Model Context Protocol (MCP)** server, enabling agents in Cursor, Claude Desktop, Antigravity, and Cline to debug themselves.
+Enable your agent in **Cursor**, **Claude Desktop**, or **Antigravity** to debug itself:
 
-### Add to your MCP Config (`cursor_mcp.json` / `claude_desktop_config.json`):
+Add to your MCP configuration (`claude_desktop_config.json` or Cursor Settings):
 
 ```json
 {
@@ -147,43 +121,44 @@ agentbisect status
 }
 ```
 
-### Available Tools:
-| Tool Name | Description |
-| :--- | :--- |
-| `agentbisect_snapshot` | Create an instant shadow git checkpoint of current workspace |
-| `agentbisect_bisect` | Run automated binary search to find which step broke tests |
-| `agentbisect_rewind` | Revert workspace to a known good step and get recovery prompt |
-| `agentbisect_get_diff` | View the unified diff of any historical step |
-| `agentbisect_status` | Get current session metadata and step count |
+### Available MCP Tools:
+
+| Tool Name | Parameters | Description |
+| :--- | :--- | :--- |
+| `agentbisect_snapshot` | `summary`, `files?` | Snapshots current workspace to shadow git |
+| `agentbisect_bisect` | `test_command`, `timeout_seconds?` | Runs binary search over recorded steps |
+| `agentbisect_rewind` | `target_step`, `hint?` | Rewinds workspace and generates recovery prompt |
+| `agentbisect_get_diff` | `step_number` | Retrieves unified git diff of any step |
+| `agentbisect_status` | *none* | Returns active session metadata and step count |
 
 ---
 
 ## 📊 Feature Comparison
 
-| Feature | Standard Git Bisect | LLM Observability (Langfuse/Arize) | **AgentBisect** |
+| Feature | Standard `git bisect` | LLM Tracing (Langfuse/Arize) | **AgentBisect** |
 | :--- | :---: | :---: | :---: |
-| **Target** | Human git commits | API prompt logs | **Agent trajectory steps** |
+| **Target Unit** | Human git commits | API prompt logs | **Agent trajectory steps** |
 | **Workspace Isolation** | ❌ Pollutes user `.git` | ❌ No workspace control | ✅ **Shadow Git (Zero pollution)** |
-| **Automated Search** | ✅ Semi-manual | ❌ No regression search | ✅ **Autonomous $\mathcal{O}(\log N)$ Search** |
-| **Context Forking** | ❌ None | ❌ None | ✅ **Workspace Rollback + Prompt Injection** |
-| **Agent MCP Integration**| ❌ None | ❌ None | ✅ **Built-in MCP Server & Skill** |
-| **Token Waste Analytics**| ❌ None | ✅ Logs tokens only | ✅ **Calculates compounding waste saved** |
+| **Autonomous Search** | ❌ Manual marking | ❌ No regression search | ✅ **Autonomous $\mathcal{O}(\log_2 N)$ Search** |
+| **Context Forking** | ❌ None | ❌ None | ✅ **Workspace Rollback + Guidance Prompt** |
+| **Agent Self-Healing (MCP)**| ❌ None | ❌ None | ✅ **Native MCP Server & Skill** |
+| **Token Waste Analytics** | ❌ None | ✅ Logs tokens only | ✅ **Calculates compounding waste saved** |
 
 ---
 
 ## 🤝 Supported Agent Frameworks
+
 - [x] **Google Antigravity & Gemini CLI** (`transcript.jsonl`)
 - [x] **Claude Code** (`.claude/` session transcripts)
 - [x] **Cursor Agent / Composer**
-- [x] **Aider**
+- [x] **Cline**
 - [x] **OpenHands / SWE-bench format**
+- [x] **Aider**
 - [x] **Generic JSON / JSONL Trajectories**
 
 ---
 
-## 🧪 Testing
-
-Run the comprehensive test suite:
+## 🧪 Running Tests
 
 ```bash
 pytest tests/ -v
@@ -192,4 +167,5 @@ pytest tests/ -v
 ---
 
 ## 📄 License
-MIT License. See [LICENSE](LICENSE) for details.
+
+Distributed under the **MIT License**. See [LICENSE](LICENSE) for details.
