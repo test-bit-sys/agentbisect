@@ -183,3 +183,22 @@ class ShadowLedger:
         commit_hash = hash_res.stdout.strip()
         self._run_git(["tag", "-f", "baseline", commit_hash])
         return commit_hash
+
+    def stash_worktree(self) -> bool:
+        """Stashes any uncommitted working tree changes into a temporary shadow tag."""
+        res = self._run_git(["status", "--porcelain"])
+        if not res.stdout.strip():
+            return False  # Worktree was clean
+
+        self._run_git(["add", "-A"])
+        self._run_git(["commit", "--allow-empty", "-m", "AgentBisect Pre-Run Stash"])
+        hash_res = self._run_git(["rev-parse", "HEAD"])
+        self._run_git(["tag", "-f", "stash_backup", hash_res.stdout.strip()])
+        return True
+
+    def restore_stash(self) -> None:
+        """Restores the stashed working tree changes."""
+        stash_res = self._run_git(["rev-parse", "stash_backup"], check=False)
+        if stash_res.returncode == 0:
+            self.restore_commit(stash_res.stdout.strip())
+            self._run_git(["tag", "-d", "stash_backup"], check=False)

@@ -14,6 +14,8 @@ import click
 from agentbisect.adapters import load_session, LiveRecorder
 from agentbisect.adapters.antigravity import AntigravityAdapter
 from agentbisect.core.bisect_engine import BisectEngine
+from agentbisect.core.bundle import BundleManager
+from agentbisect.core.doctor import SystemDoctor
 from agentbisect.core.fork_engine import ForkEngine
 from agentbisect.core.models import AgentSession
 from agentbisect.core.shadow_ledger import ShadowLedger
@@ -38,6 +40,8 @@ def main():
 @click.option("--transcript", "-t", type=click.Path(exists=True), help="Path to transcript file (JSON/JSONL).")
 @click.option("--workspace", "-w", type=click.Path(exists=True), default=".", help="Workspace root directory.")
 @click.option("--timeout", type=int, default=60, help="Timeout in seconds per test run.")
+@click.option("--retries", "-r", type=int, default=1, help="Retry attempts for flaky test handling (default: 1).")
+@click.option("--strategy", "-s", type=click.Choice(["binary", "heuristic"]), default="binary", help="Search strategy (default: binary).")
 @click.option("--html/--no-html", default=True, help="Generate HTML report (default: True).")
 @click.option("--open/--no-open", "open_browser", default=False, help="Open HTML report in browser automatically.")
 def find_cmd(
@@ -45,10 +49,12 @@ def find_cmd(
     transcript: Optional[str],
     workspace: str,
     timeout: int,
+    retries: int,
+    strategy: str,
     html: bool,
     open_browser: bool,
 ):
-    """Run binary search over agent steps to locate the exact step that broke TEST_COMMAND."""
+    """Run binary or heuristic search over agent steps to locate the exact step that broke TEST_COMMAND."""
     TerminalUI.print_banner()
     ws_path = Path(workspace).resolve()
 
@@ -78,7 +84,8 @@ def find_cmd(
 
     console.print(f"[bold cyan]Workspace:[/bold cyan] {ws_path}")
     console.print(f"[bold cyan]Transcript:[/bold cyan] {trans_path}")
-    console.print(f"[bold cyan]Test Command:[/bold cyan] [yellow]{test_command}[/yellow]\n")
+    console.print(f"[bold cyan]Test Command:[/bold cyan] [yellow]{test_command}[/yellow]")
+    console.print(f"[bold cyan]Strategy:[/bold cyan] [white]{strategy}[/white] | [bold cyan]Retries:[/bold cyan] [white]{retries}[/white]\n")
 
     # Load session
     session = load_session(trans_path, ws_path)
@@ -92,23 +99,40 @@ def find_cmd(
     # Initialize ledger and ensure steps are committed
     ledger = ShadowLedger(ws_path)
 
-    console.print("\n[bold cyan]Starting binary search across steps...[/bold cyan]")
+    console.print("\n[bold cyan]Starting search across steps...[/bold cyan]")
 
     engine = BisectEngine(
         session=session,
         ledger=ledger,
         test_command=test_command,
         timeout_seconds=timeout,
+        retries=retries,
+        strategy=strategy,
         on_step_evaluated=TerminalUI.print_bisect_step_evaluated,
     )
 
     report = engine.run()
     TerminalUI.print_report(report)
 
+    # Output to GitHub Step Summary if running in CI
+    gh_summary = os.environ.get("GITHUB_STEP_SUMMARY")
+    if gh_summary:
+        try:
+            with open(gh_summary, "a", encoding="utf-8") as f:
+                f.write(f"\n## ⚡ AgentBisect Result for `{test_command}`\n")
+                if report.is_found():
+                    f.write(f"- **First Broken Step:** Step #{report.first_bad_step.step_number}\n")
+                    f.write(f"- **Divergence Reason:** {report.divergence_reason}\n")
+                    f.write(f"- **Last Known Good:** Step #{report.last_good_step.step_number if report.last_good_step else 0}\n")
+                else:
+                    f.write(f"- {report.divergence_reason}\n")
+        except Exception:
+            pass
+
     if html:
         report_file = ws_path / "agentbisect_report.html"
         HTMLReportGenerator.generate(report, session, report_file)
-        console.print(f"\n[bold green]✔ Interactive HTML Report generated:[/bold green] {report_file}")
+        console.print(f"\n[bold green][OK] Interactive HTML Report generated:[/bold green] {report_file}")
         if open_browser:
             webbrowser.open(report_file.as_uri())
 
@@ -250,6 +274,59 @@ def status_cmd(workspace: str):
     console.print(f"[bold cyan]Framework:[/bold cyan] {session.metadata.framework}")
     console.print(f"[bold cyan]Total Steps:[/bold cyan] {len(session.steps)}")
     console.print(f"[bold cyan]Created At:[/bold cyan] {session.metadata.created_at}")
+
+
+@main.command(name="doctor")
+@click.option("--workspace", "-w", type=click.Path(exists=True), default=".", help="Workspace root directory.")
+def doctor_cmd(workspace: str):
+    """Run pre-flight environment, dependency, and workspace diagnostics."""
+    TerminalUI.print_banner()
+    console.print("[bold cyan]Running AgentBisect System Diagnostics...[/bold cyan]\n")
+    checks = SystemDoctor.run_diagnostics(workspace)
+    all_ok = True
+    for name, ok, msg in checks:
+        if ok:
+            console.print(f"  [bold green][PASS][/bold green] [bold white]{name}:[/bold white] {msg}")
+        else:
+            all_ok = False
+            console.print(f"  [bold red][FAIL][/bold red] [bold white]{name}:[/bold white] {msg}")
+
+    if all_ok:
+        console.print("\n[bold green][OK] Environment is healthy and ready for AgentBisect![/bold green]")
+    else:
+        console.print("\n[bold yellow][!] Some diagnostic checks reported warnings or errors.[/bold yellow]")
+
+
+@main.group(name="bundle")
+def bundle_group():
+    """Export and import portable .bisect evidence bundles for collaboration."""
+    pass
+
+
+@bundle_group.command(name="export")
+@click.option("--output", "-o", type=click.Path(), help="Output path for .bisect.zip bundle.")
+@click.option("--workspace", "-w", type=click.Path(exists=True), default=".", help="Workspace root directory.")
+def bundle_export_cmd(output: Optional[str], workspace: str):
+    """Export the current session trajectory and shadow ledger into a portable bundle."""
+    try:
+        out = BundleManager.export_bundle(workspace, output)
+        console.print(f"[bold green][OK] Evidence bundle exported successfully:[/bold green] [cyan]{out}[/cyan]")
+    except Exception as e:
+        console.print(f"[bold red]Export failed:[/bold red] {e}")
+        sys.exit(1)
+
+
+@bundle_group.command(name="import")
+@click.argument("bundle_path", type=click.Path(exists=True), required=True)
+@click.argument("target_dir", type=click.Path(), default=".", required=False)
+def bundle_import_cmd(bundle_path: str, target_dir: str):
+    """Import a portable .bisect.zip bundle into target directory for inspection."""
+    try:
+        session = BundleManager.import_bundle(bundle_path, target_dir)
+        console.print(f"[bold green][OK] Successfully imported session:[/bold green] [cyan]{session.metadata.session_id}[/cyan] with {len(session.steps)} steps into [cyan]{target_dir}[/cyan]")
+    except Exception as e:
+        console.print(f"[bold red]Import failed:[/bold red] {e}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

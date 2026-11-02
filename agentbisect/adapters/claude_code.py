@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 from typing import List
 from agentbisect.adapters.base import BaseAdapter
+from agentbisect.adapters.registry import register_adapter
 from agentbisect.core.models import (
     AgentSession,
     AgentStep,
@@ -16,6 +17,7 @@ from agentbisect.core.models import (
 )
 
 
+@register_adapter
 class ClaudeCodeAdapter(BaseAdapter):
     name = "claude_code"
 
