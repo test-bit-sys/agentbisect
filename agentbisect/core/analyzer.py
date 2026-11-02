@@ -34,17 +34,38 @@ class SessionAnalyzer:
 
         for step in session.steps:
             if step.step_number >= first_bad_step_num:
-                if step.token_usage:
-                    total_wasted_tokens += step.token_usage.get("total", step.token_usage.get("total_tokens", 0))
-                else:
-                    # Default heuristic estimation: ~1,800 tokens per agent turn
-                    total_wasted_tokens += 1800
+                tokens = 0
+                if step.token_usage and isinstance(step.token_usage, dict):
+                    raw = (
+                        step.token_usage.get("total")
+                        or step.token_usage.get("total_tokens")
+                    )
+                    if raw is None:
+                        prompt_t = step.token_usage.get("prompt_tokens") or 0
+                        comp_t = step.token_usage.get("completion_tokens") or 0
+                        try:
+                            raw = int(prompt_t) + int(comp_t)
+                        except (ValueError, TypeError):
+                            raw = 0
+                    try:
+                        tokens = int(raw)
+                    except (ValueError, TypeError):
+                        tokens = 0
 
-                if step.duration_ms:
-                    total_duration_ms += step.duration_ms
-                else:
-                    # Default heuristic estimation: ~25 seconds per agent step
-                    total_duration_ms += 25000
+                if not tokens or tokens <= 0:
+                    # Default heuristic estimation: ~1,800 tokens per agent turn
+                    tokens = 1800
+                total_wasted_tokens += tokens
+
+                dur = 0
+                if step.duration_ms is not None:
+                    try:
+                        dur = int(step.duration_ms)
+                    except (ValueError, TypeError):
+                        dur = 0
+                if dur <= 0:
+                    dur = 25000
+                total_duration_ms += dur
 
         # Typical blended LLM API price (e.g. Claude 3.5 Sonnet / GPT-4o blend ~$0.000025 per token)
         estimated_cost = round((total_wasted_tokens / 1000.0) * 0.02, 3)

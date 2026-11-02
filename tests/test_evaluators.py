@@ -82,3 +82,39 @@ def test_command_evaluator_flaky_retry_tracking(temp_workspace):
     assert res.attempts[0].status == BisectStatus.FAIL
     assert res.attempts[1].status == BisectStatus.PASS
 
+
+
+def test_command_evaluator_terminates_process_tree_on_timeout(temp_workspace):
+    """
+    Regression test: Verifies that CommandEvaluator forcefully terminates
+    the spawned process tree when timing out.
+    """
+    import sys
+    eval_timeout = CommandEvaluator(
+        command=f'"{sys.executable}" -c "import time; time.sleep(15)"',
+        timeout_seconds=1,
+    )
+    res = eval_timeout.evaluate(step_number=1, commit_hash="c_to", workspace_root=temp_workspace)
+    assert res.status == BisectStatus.INCONCLUSIVE
+    assert "timed out after 1 seconds" in res.stderr
+    assert res.exit_code == -1
+
+
+def test_command_evaluator_captures_partial_output_on_timeout(temp_workspace):
+    """
+    Adversarial test: Verifies that partial stdout emitted before timeout is captured.
+    """
+    import sys
+    cmd = (
+        f'"{sys.executable}" -u -c '
+        '"import sys, time; '
+        'sys.stdout.write(\'partial stdout\\n\'); sys.stdout.flush(); '
+        'sys.stderr.write(\'partial stderr\\n\'); sys.stderr.flush(); '
+        'time.sleep(15)"'
+    )
+    evaluator = CommandEvaluator(command=cmd, timeout_seconds=1)
+    res = evaluator.evaluate(step_number=1, commit_hash="c_partial", workspace_root=temp_workspace)
+    assert res.status == BisectStatus.INCONCLUSIVE
+    assert "partial stdout" in res.stdout
+    assert "partial stderr" in res.stderr
+    assert "timed out after 1 seconds" in res.stderr

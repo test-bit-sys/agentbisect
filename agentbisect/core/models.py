@@ -59,7 +59,7 @@ class AgentStep(BaseModel):
     files_affected: List[str] = Field(default_factory=list, description="Paths of files modified/created")
     commit_hash: Optional[str] = Field(default=None, description="Shadow git commit hash corresponding to this state")
     diff: Optional[str] = Field(default=None, description="Unified git diff introduced at this step")
-    token_usage: Optional[Dict[str, int]] = Field(default=None, description="Tokens used: prompt, completion, total")
+    token_usage: Optional[Dict[str, Any]] = Field(default=None, description="Tokens used: prompt, completion, total")
     duration_ms: Optional[int] = Field(default=None, description="Duration of step execution in ms")
 
     def summary(self) -> str:

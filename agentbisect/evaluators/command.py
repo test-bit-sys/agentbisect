@@ -5,12 +5,33 @@ Command-based Evaluator with timeout, explicit regression oracle, and flaky test
 from __future__ import annotations
 
 import os
+import signal
 import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import List, Optional
 from agentbisect.core.models import BisectStatus, BisectStepResult, EvaluationAttempt
 from agentbisect.evaluators.base import BaseEvaluator
+
+
+def _kill_process_tree(pid: int) -> None:
+    """Terminates an entire process tree reliably on Windows and POSIX."""
+    if sys.platform == "win32":
+        try:
+            subprocess.run(
+                ["taskkill", "/F", "/T", "/PID", str(pid)],
+                capture_output=True,
+                timeout=5.0,
+            )
+        except Exception:
+            pass
+    else:
+        try:
+            pgid = os.getpgid(pid)
+            os.killpg(pgid, signal.SIGKILL)
+        except Exception:
+            pass
 
 
 class CommandEvaluator(BaseEvaluator):
@@ -35,40 +56,65 @@ class CommandEvaluator(BaseEvaluator):
         workspace_root: Path,
     ) -> EvaluationAttempt:
         start_time = time.time()
+        proc: Optional[subprocess.Popen] = None
         try:
-            proc = subprocess.run(
+            kwargs = {}
+            if sys.platform != "win32":
+                kwargs["start_new_session"] = True
+
+            proc = subprocess.Popen(
                 self.command,
                 shell=True,
                 cwd=str(workspace_root),
-                capture_output=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 text=True,
-                timeout=self.timeout_seconds,
                 encoding="utf-8",
                 errors="replace",
+                **kwargs,
             )
+            stdout, stderr = proc.communicate(timeout=self.timeout_seconds)
             duration = round(time.time() - start_time, 3)
             status = BisectStatus.PASS if proc.returncode == 0 else BisectStatus.FAIL
             return EvaluationAttempt(
                 attempt_number=attempt_number,
                 status=status,
                 exit_code=proc.returncode,
-                stdout=proc.stdout,
-                stderr=proc.stderr,
+                stdout=stdout or "",
+                stderr=stderr or "",
                 duration_seconds=duration,
             )
-        except subprocess.TimeoutExpired as e:
+        except subprocess.TimeoutExpired:
+            stdout, stderr = "", ""
+            if proc is not None:
+                _kill_process_tree(proc.pid)
+                try:
+                    stdout, stderr = proc.communicate(timeout=1.0)
+                except Exception:
+                    try:
+                        proc.kill()
+                    except Exception:
+                        pass
+
             duration = round(time.time() - start_time, 3)
-            stdout = e.stdout if isinstance(e.stdout, str) else (e.stdout.decode("utf-8", errors="replace") if e.stdout else "")
-            stderr = f"Test command timed out after {self.timeout_seconds} seconds."
+            stderr_msg = f"Test command timed out after {self.timeout_seconds} seconds."
+            if stderr:
+                stderr_msg += f"\n{stderr}"
             return EvaluationAttempt(
                 attempt_number=attempt_number,
                 status=BisectStatus.INCONCLUSIVE,
                 exit_code=-1,
-                stdout=stdout,
-                stderr=stderr,
+                stdout=stdout or "",
+                stderr=stderr_msg,
                 duration_seconds=duration,
             )
         except Exception as e:
+            if proc is not None and proc.poll() is None:
+                _kill_process_tree(proc.pid)
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
             duration = round(time.time() - start_time, 3)
             return EvaluationAttempt(
                 attempt_number=attempt_number,

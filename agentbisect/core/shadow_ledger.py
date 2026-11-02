@@ -117,12 +117,26 @@ class ShadowLedger:
             )
             # 2. Allow work tree operations
             self._run_git(["config", "core.bare", "false"], include_work_tree=False)
+            self._run_git(["config", "core.quotePath", "false"], include_work_tree=False)
 
             # 3. Exclude internal files from shadow tracking
             info_exclude = self.git_dir / "info" / "exclude"
             info_exclude.parent.mkdir(parents=True, exist_ok=True)
             with open(info_exclude, "w", encoding="utf-8") as f:
-                f.write(".agentbisect/\n.agentbisect/**\n__pycache__/\nnode_modules/\n.git/\n.git/**\n")
+                f.write(".agentbisect/\n.agentbisect/**\nAGENT_FORK_PROMPT.md\nagentbisect_report.html\n*.bisect.zip\n__pycache__/\nnode_modules/\n.git/\n.git/**\n")
+
+    def _normalize_file_path(self, f: str | Path) -> Optional[str]:
+        """Normalizes a file path relative to workspace root using forward slashes."""
+        try:
+            p = Path(f)
+            if not p.is_absolute():
+                p = (self.workspace_root / p).resolve()
+            else:
+                p = p.resolve()
+            rel = p.relative_to(self.workspace_root)
+            return str(rel).replace("\\", "/")
+        except ValueError:
+            return None
 
     def snapshot_step(
         self,
@@ -137,10 +151,21 @@ class ShadowLedger:
         with self.lock():
             # Add files to index
             if files:
-                # Add specific files
-                existing_files = [f for f in files if (self.workspace_root / f).exists()]
+                existing_files: List[str] = []
+                missing_files: List[str] = []
+                for f in files:
+                    norm = self._normalize_file_path(f)
+                    if not norm:
+                        continue
+                    if (self.workspace_root / norm).exists():
+                        existing_files.append(norm)
+                    else:
+                        missing_files.append(norm)
+
                 if existing_files:
-                    self._run_git(["add"] + existing_files)
+                    self._run_git(["add", "--"] + existing_files)
+                if missing_files:
+                    self._run_git(["rm", "-rf", "--ignore-unmatch", "--"] + missing_files)
             else:
                 # Add all workspace files (respecting exclude)
                 self._run_git(["add", "-A"])
@@ -187,7 +212,9 @@ class ShadowLedger:
             "-e", ".agentbisect",
             "-e", ".agentbisect/**",
             "-e", ".git",
-            "-e", ".git/**"
+            "-e", ".git/**",
+            "-e", "AGENT_FORK_PROMPT.md",
+            "-e", "agentbisect_report.html",
         ])
 
     def get_step_diff(self, step_number: int) -> str:
@@ -225,7 +252,7 @@ class ShadowLedger:
             parent = parent_res.stdout.strip()
             res = self._run_git(["diff", "--name-only", parent, commit], check=False)
         else:
-            res = self._run_git(["diff-tree", "--no-commit-id", "--name-only", "-r", commit], check=False)
+            res = self._run_git(["diff-tree", "--root", "--no-commit-id", "--name-only", "-r", commit], check=False)
         lines = [line.strip() for line in res.stdout.splitlines() if line.strip()]
         return lines
 
@@ -267,4 +294,7 @@ class ShadowLedger:
                 self._run_git(["tag", "-d", "stash_backup"], check=False)
                 if parent:
                     self._run_git(["reset", parent], check=False)
+                else:
+                    self._run_git(["update-ref", "-d", "HEAD"], check=False)
+                    self._run_git(["read-tree", "--empty"], check=False)
 

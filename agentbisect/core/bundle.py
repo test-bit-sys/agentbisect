@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import tempfile
 import zipfile
 from pathlib import Path
 from typing import Optional
@@ -49,8 +50,14 @@ class BundleManager:
             for root, _, files in shutil.os.walk(dot_bisect):
                 for f in files:
                     full_p = Path(root) / f
+                    # Skip the archive itself if created inside .agentbisect
+                    if full_p.resolve() == out_file.resolve():
+                        continue
+                    # Exclude lock files and temporary files
+                    if f.endswith(".lock") or f.endswith(".tmp") or f == "agentbisect.lock":
+                        continue
                     rel_p = full_p.relative_to(ws_path)
-                    zip_f.write(full_p, arcname=str(rel_p))
+                    zip_f.write(full_p, arcname=rel_p.as_posix())
 
         return out_file
 
@@ -66,8 +73,14 @@ class BundleManager:
 
         with zipfile.ZipFile(b_path, "r") as zip_f:
             total_uncompressed = 0
+            seen_entries = set()
+
             # Pre-validation pass: check all members before extracting anything
             for info in zip_f.infolist():
+                if info.filename in seen_entries:
+                    raise ValueError(f"Duplicate entry detected in bundle: {info.filename}")
+                seen_entries.add(info.filename)
+
                 total_uncompressed += info.file_size
                 if total_uncompressed > MAX_BUNDLE_UNCOMPRESSED_BYTES:
                     raise ValueError(
@@ -79,8 +92,9 @@ class BundleManager:
                 if is_symlink:
                     raise ValueError(f"Unsafe symlink entry detected in bundle: {info.filename}")
 
-                norm_name = os.path.normpath(info.filename)
-                if os.path.isabs(norm_name) or norm_name.startswith("..") or ("../" in info.filename) or ("..\\" in info.filename):
+                norm_name = os.path.normpath(info.filename.replace("\\", "/"))
+                # Disallow Windows drive letters (e.g. C:foo) and path traversals
+                if os.path.splitdrive(norm_name)[0] or os.path.isabs(norm_name) or norm_name.startswith("..") or ("../" in info.filename) or ("..\\" in info.filename):
                     raise ValueError(f"Path traversal detected in bundle entry: {info.filename}")
 
                 dest = (target_ws / norm_name).resolve()
@@ -95,22 +109,55 @@ class BundleManager:
                 if not parts or parts[0] != ".agentbisect":
                     raise ValueError(f"Bundle contains file outside .agentbisect: {info.filename}")
 
-            # Safe extraction
-            for info in zip_f.infolist():
-                dest = (target_ws / os.path.normpath(info.filename)).resolve()
-                if info.is_dir():
-                    dest.mkdir(parents=True, exist_ok=True)
-                else:
-                    dest.parent.mkdir(parents=True, exist_ok=True)
-                    with zip_f.open(info) as src, open(dest, "wb") as dst:
-                        shutil.copyfileobj(src, dst)
+            # Transactional extraction via temporary directory to prevent corrupting workspace on error
+            parent_dir = target_ws.parent if target_ws.parent.exists() else None
+            with tempfile.TemporaryDirectory(dir=parent_dir) as tmp_dir:
+                tmp_path = Path(tmp_dir)
+                for info in zip_f.infolist():
+                    dest = (tmp_path / os.path.normpath(info.filename.replace("\\", "/"))).resolve()
+                    if info.is_dir():
+                        dest.mkdir(parents=True, exist_ok=True)
+                    else:
+                        dest.parent.mkdir(parents=True, exist_ok=True)
+                        with zip_f.open(info) as src, open(dest, "wb") as dst:
+                            shutil.copyfileobj(src, dst)
 
-        session_file = target_ws / ".agentbisect" / "current_session.json"
-        if not session_file.exists():
-            raise ValueError("Imported bundle did not contain a valid session.")
+                session_file = tmp_path / ".agentbisect" / "current_session.json"
+                if not session_file.exists():
+                    raise ValueError("Imported bundle did not contain a valid session.")
 
-        session = AgentSession.load_json(session_file)
-        # Update workspace root to current machine
-        session.metadata.workspace_root = str(target_ws)
-        session.save_json(session_file)
-        return session
+                # Clean up any stale lock files from imported bundle
+                for lock_file in (tmp_path / ".agentbisect").rglob("*.lock"):
+                    try:
+                        lock_file.unlink()
+                    except OSError:
+                        pass
+
+                session = AgentSession.load_json(session_file)
+                # Update workspace root to current machine
+                session.metadata.workspace_root = str(target_ws)
+                session.save_json(session_file)
+
+                # Atomically sync .agentbisect into target workspace with safe rollback
+                target_dot_bisect = target_ws / ".agentbisect"
+                backup_dot_bisect = target_ws / ".agentbisect_backup"
+                if backup_dot_bisect.exists():
+                    shutil.rmtree(backup_dot_bisect)
+
+                has_existing = target_dot_bisect.exists()
+                if has_existing:
+                    shutil.move(str(target_dot_bisect), str(backup_dot_bisect))
+
+                try:
+                    shutil.copytree(tmp_path / ".agentbisect", target_dot_bisect)
+                    if has_existing and backup_dot_bisect.exists():
+                        shutil.rmtree(backup_dot_bisect)
+                except Exception:
+                    # Roll back to preserved original data
+                    if target_dot_bisect.exists():
+                        shutil.rmtree(target_dot_bisect)
+                    if has_existing and backup_dot_bisect.exists():
+                        shutil.move(str(backup_dot_bisect), str(target_dot_bisect))
+                    raise
+
+                return session

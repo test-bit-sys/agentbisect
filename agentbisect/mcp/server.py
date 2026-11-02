@@ -270,10 +270,65 @@ class AgentBisectMCPServer:
                 "isError": True,
             }
 
-    def run_stdio(self) -> None:
+    def handle_request(self, request: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Handles a single JSON-RPC request or notification according to MCP specification."""
+        if not isinstance(request, dict):
+            return {
+                "jsonrpc": "2.0",
+                "id": None,
+                "error": {"code": -32600, "message": "Invalid Request: request must be a JSON object"},
+            }
+
+        req_id = request.get("id")
+        method = request.get("method")
+        params = request.get("params", {})
+
+        # Handle notifications: requests without an 'id' member or notifications/* methods
+        if "id" not in request or (isinstance(method, str) and method.startswith("notifications/")):
+            # JSON-RPC 2.0 & MCP: Server MUST NOT reply to notifications
+            return None
+
+        if method == "initialize":
+            return {
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "result": {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": {"tools": {}},
+                    "serverInfo": {"name": "agentbisect", "version": "0.1.0"},
+                },
+            }
+        elif method == "ping":
+            return {
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "result": {},
+            }
+        elif method == "tools/list":
+            return {
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "result": {"tools": self.get_tool_definitions()},
+            }
+        elif method == "tools/call":
+            tool_name = params.get("name")
+            arguments = params.get("arguments", {})
+            result = self.handle_call_tool(tool_name, arguments)
+            return {"jsonrpc": "2.0", "id": req_id, "result": result}
+        else:
+            return {
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "error": {"code": -32601, "message": f"Method not found: {method}"},
+            }
+
+    def run_stdio(self, in_stream=None, out_stream=None) -> None:
         """Runs the standard MCP JSON-RPC protocol over stdin/stdout."""
+        stdin_stream = in_stream or sys.stdin
+        stdout_stream = out_stream or sys.stdout
+
         while True:
-            line = sys.stdin.readline()
+            line = stdin_stream.readline()
             if not line:
                 break
             line = line.strip()
@@ -282,47 +337,36 @@ class AgentBisectMCPServer:
 
             try:
                 request = json.loads(line)
-                req_id = request.get("id")
-                method = request.get("method")
-                params = request.get("params", {})
+                if not isinstance(request, dict):
+                    err_response = {
+                        "jsonrpc": "2.0",
+                        "id": None,
+                        "error": {"code": -32600, "message": "Invalid Request: expected JSON object"},
+                    }
+                    stdout_stream.write(json.dumps(err_response) + "\n")
+                    stdout_stream.flush()
+                    continue
 
-                if method == "initialize":
-                    response = {
-                        "jsonrpc": "2.0",
-                        "id": req_id,
-                        "result": {
-                            "protocolVersion": "2024-11-05",
-                            "capabilities": {"tools": {}},
-                            "serverInfo": {"name": "agentbisect", "version": "0.1.0"},
-                        },
-                    }
-                elif method == "tools/list":
-                    response = {
-                        "jsonrpc": "2.0",
-                        "id": req_id,
-                        "result": {"tools": self.get_tool_definitions()},
-                    }
-                elif method == "tools/call":
-                    tool_name = params.get("name")
-                    arguments = params.get("arguments", {})
-                    result = self.handle_call_tool(tool_name, arguments)
-                    response = {"jsonrpc": "2.0", "id": req_id, "result": result}
-                else:
-                    response = {
-                        "jsonrpc": "2.0",
-                        "id": req_id,
-                        "error": {"code": -32601, "message": f"Method not found: {method}"},
-                    }
-                sys.stdout.write(json.dumps(response) + "\n")
-                sys.stdout.flush()
+                response = self.handle_request(request)
+                if response is not None:
+                    stdout_stream.write(json.dumps(response) + "\n")
+                    stdout_stream.flush()
+            except json.JSONDecodeError as e:
+                err_response = {
+                    "jsonrpc": "2.0",
+                    "id": None,
+                    "error": {"code": -32700, "message": f"Parse error: {e}"},
+                }
+                stdout_stream.write(json.dumps(err_response) + "\n")
+                stdout_stream.flush()
             except Exception as e:
                 err_response = {
                     "jsonrpc": "2.0",
                     "id": None,
                     "error": {"code": -32603, "message": str(e)},
                 }
-                sys.stdout.write(json.dumps(err_response) + "\n")
-                sys.stdout.flush()
+                stdout_stream.write(json.dumps(err_response) + "\n")
+                stdout_stream.flush()
 
 
 def main():

@@ -9,7 +9,7 @@ import os
 import subprocess
 import time
 from pathlib import Path
-from typing import Callable, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 from agentbisect.core.models import (
     AgentStep,
     AgentSession,
@@ -49,10 +49,17 @@ class BisectEngine:
         self.strategy = strategy
         self.on_step_evaluated = on_step_evaluated
         self.evaluated_steps: List[BisectStepResult] = []
+        self._evaluation_cache: Dict[Tuple[int, str, str], BisectStepResult] = {}
 
         if evaluator:
             self.evaluator = evaluator
-            self.test_command = getattr(evaluator, "command", evaluator.name)
+            cmd_val = getattr(evaluator, "command", None)
+            if cmd_val and isinstance(cmd_val, str):
+                self.test_command = cmd_val
+            elif hasattr(evaluator, "name") and isinstance(evaluator.name, str):
+                self.test_command = evaluator.name
+            else:
+                self.test_command = "evaluator"
         elif test_command:
             self.test_command = test_command
             self.evaluator = CommandEvaluator(
@@ -106,7 +113,11 @@ class BisectEngine:
         return len(errors) == 0, errors
 
     def _execute_test(self, step_number: int, commit_hash: str) -> BisectStepResult:
-        """Restores workspace to the given step and executes the evaluation strategy."""
+        """Restores workspace to the given step and executes the evaluation strategy with memoization."""
+        cache_key = (step_number, commit_hash, self.test_command)
+        if cache_key in self._evaluation_cache:
+            return self._evaluation_cache[cache_key].model_copy(deep=True)
+
         try:
             self.ledger.restore_step(step_number)
             result = self.evaluator.evaluate(
@@ -114,7 +125,10 @@ class BisectEngine:
                 commit_hash=commit_hash,
                 workspace_root=self.ledger.workspace_root,
             )
+            # Cache completed evaluation results
+            self._evaluation_cache[cache_key] = result.model_copy(deep=True)
         except Exception as e:
+            # Infrastructure exceptions during restore are not cached so retries can succeed
             result = BisectStepResult(
                 step_number=step_number,
                 commit_hash=commit_hash,
@@ -125,7 +139,6 @@ class BisectEngine:
                 duration_seconds=0.0,
                 command=self.test_command,
             )
-
         self.evaluated_steps.append(result)
         if self.on_step_evaluated:
             self.on_step_evaluated(result, len(self.evaluated_steps), len(self.session.steps))
@@ -143,6 +156,10 @@ class BisectEngine:
         Returns a BisectReport containing the first bad step, confidence, and analysis.
         Guarantees transactional workspace restoration.
         """
+        # Scope cache and evaluated steps strictly to this run
+        self.evaluated_steps = []
+        self._evaluation_cache.clear()
+
         total_steps = len(self.session.steps)
         if total_steps == 0:
             raise ValueError("Session contains no steps to bisect.")
@@ -171,6 +188,65 @@ class BisectEngine:
         diagnostics: List[str] = []
 
         try:
+            # Handle single-step trajectories cleanly
+            if total_steps == 1:
+                commit_1 = self.ledger.get_commit_for_step(1) or ""
+                res_1 = self._execute_test(1, commit_1)
+                if res_1.status == BisectStatus.PASS:
+                    return BisectReport(
+                        session_id=self.session.metadata.session_id,
+                        test_command=self.test_command,
+                        total_steps=1,
+                        first_bad_step=None,
+                        last_good_step=self.session.get_step(1),
+                        steps_evaluated=self.evaluated_steps,
+                        evaluations_count=len(self.evaluated_steps),
+                        classification=RegressionClassification.NO_REGRESSION,
+                        confidence=1.0,
+                        divergence_reason="Step 1 PASSES the test. No regression detected.",
+                    )
+                elif res_1.status == BisectStatus.FAIL:
+                    return BisectReport(
+                        session_id=self.session.metadata.session_id,
+                        test_command=self.test_command,
+                        total_steps=1,
+                        first_bad_step=self.session.get_step(1),
+                        last_good_step=None,
+                        steps_evaluated=self.evaluated_steps,
+                        evaluations_count=len(self.evaluated_steps),
+                        classification=RegressionClassification.BROKEN_BASELINE,
+                        confidence=1.0,
+                        divergence_reason="Step 1 FAILS the test! The test was broken before the agent began.",
+                    )
+                elif res_1.status == BisectStatus.ERROR:
+                    return BisectReport(
+                        session_id=self.session.metadata.session_id,
+                        test_command=self.test_command,
+                        total_steps=1,
+                        first_bad_step=self.session.get_step(1),
+                        last_good_step=None,
+                        steps_evaluated=self.evaluated_steps,
+                        evaluations_count=len(self.evaluated_steps),
+                        classification=RegressionClassification.BROKEN_BASELINE,
+                        confidence=1.0,
+                        diagnostics=[f"Step #1 baseline returned ERROR: {res_1.stderr}"],
+                        divergence_reason=f"Step 1 baseline failed with ERROR! {res_1.stderr.strip()}",
+                    )
+                else:  # INCONCLUSIVE
+                    return BisectReport(
+                        session_id=self.session.metadata.session_id,
+                        test_command=self.test_command,
+                        total_steps=1,
+                        first_bad_step=None,
+                        last_good_step=None,
+                        steps_evaluated=self.evaluated_steps,
+                        evaluations_count=len(self.evaluated_steps),
+                        classification=RegressionClassification.INCONCLUSIVE,
+                        confidence=0.0,
+                        diagnostics=[f"Step #1 baseline returned INCONCLUSIVE: {res_1.stderr}"],
+                        divergence_reason=f"Step 1 baseline test is INCONCLUSIVE (timed out or unstable): {res_1.stderr.strip()}",
+                    )
+
             latest_step_num = known_bad if known_bad is not None else total_steps
             latest_commit = self.ledger.get_commit_for_step(latest_step_num) or ""
 
@@ -178,7 +254,7 @@ class BisectEngine:
             last_good_step: Optional[AgentStep] = None
             bad_test_result: Optional[BisectStepResult] = None
 
-            if verify_endpoints and total_steps > 1:
+            if verify_endpoints:
                 # 1. Verify latest step fails
                 res_latest = self._execute_test(latest_step_num, latest_commit)
                 if res_latest.status == BisectStatus.PASS:
@@ -215,8 +291,34 @@ class BisectEngine:
                         confidence=1.0,
                         divergence_reason=f"Step {first_step_num} already FAILS the test! The test was broken before the agent began.",
                     )
-                elif res_first.status in (BisectStatus.ERROR, BisectStatus.INCONCLUSIVE):
-                    diagnostics.append(f"Step #{first_step_num} baseline returned {res_first.status}: {res_first.stderr}")
+                elif res_first.status == BisectStatus.ERROR:
+                    return BisectReport(
+                        session_id=self.session.metadata.session_id,
+                        test_command=self.test_command,
+                        total_steps=total_steps,
+                        first_bad_step=self.session.get_step(first_step_num),
+                        last_good_step=None,
+                        steps_evaluated=self.evaluated_steps,
+                        evaluations_count=len(self.evaluated_steps),
+                        classification=RegressionClassification.BROKEN_BASELINE,
+                        confidence=1.0,
+                        diagnostics=[f"Step #{first_step_num} baseline returned ERROR: {res_first.stderr}"],
+                        divergence_reason=f"Step {first_step_num} baseline failed with ERROR! {res_first.stderr.strip()}",
+                    )
+                elif res_first.status == BisectStatus.INCONCLUSIVE:
+                    return BisectReport(
+                        session_id=self.session.metadata.session_id,
+                        test_command=self.test_command,
+                        total_steps=total_steps,
+                        first_bad_step=None,
+                        last_good_step=None,
+                        steps_evaluated=self.evaluated_steps,
+                        evaluations_count=len(self.evaluated_steps),
+                        classification=RegressionClassification.INCONCLUSIVE,
+                        confidence=0.0,
+                        diagnostics=[f"Step #{first_step_num} baseline returned INCONCLUSIVE: {res_first.stderr}"],
+                        divergence_reason=f"Step {first_step_num} baseline test is INCONCLUSIVE (timed out or unstable): {res_first.stderr.strip()}",
+                    )
 
                 last_good_step = self.session.get_step(first_step_num)
 
@@ -313,14 +415,27 @@ class BisectEngine:
                 classification = RegressionClassification.PROBABLE
                 confidence = 0.80
             elif first_bad_step:
-                good_n = last_good_step.step_number if last_good_step else 0
-                bad_n = first_bad_step.step_number
-                if bad_n == good_n + 1:
-                    classification = RegressionClassification.CONFIRMED
-                    confidence = 0.98
+                if last_good_step is not None:
+                    good_n = last_good_step.step_number
+                    bad_n = first_bad_step.step_number
+                    if bad_n == good_n + 1:
+                        classification = RegressionClassification.CONFIRMED
+                        confidence = 0.98
+                    else:
+                        classification = RegressionClassification.PROBABLE
+                        confidence = 0.85
                 else:
-                    classification = RegressionClassification.PROBABLE
-                    confidence = 0.85
+                    # No passing step was ever observed
+                    if first_bad_step.step_number == 1:
+                        classification = RegressionClassification.BROKEN_BASELINE
+                        confidence = 0.90
+                        diagnostics.append("Step 1 failed and no passing step was verified; baseline appears broken.")
+                    else:
+                        classification = RegressionClassification.PROBABLE
+                        confidence = 0.70
+            elif last_good_step:
+                classification = RegressionClassification.NO_REGRESSION
+                confidence = 1.0
             else:
                 classification = RegressionClassification.INCONCLUSIVE
                 confidence = 0.50
@@ -351,6 +466,8 @@ class BisectEngine:
                     f"```\n{divergence_reason}\n```\n"
                     f"Please take an alternative approach that preserves existing tests and avoids this error."
                 )
+            elif last_good_step:
+                divergence_reason = "All evaluated steps passed the test. No regression detected."
 
             return BisectReport(
                 session_id=self.session.metadata.session_id,
@@ -371,7 +488,6 @@ class BisectEngine:
         finally:
             # Guarantee workspace restoration
             if stashed:
-                self.ledger.restore_stash()
+                self.ledger.restore_stash(parent_commit=original_head)
             elif original_head:
                 self.ledger.restore_commit(original_head)
-

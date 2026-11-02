@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/test-bit-sys/agentbisect/actions"><img src="https://img.shields.io/badge/tests-42%20passed-brightgreen?style=for-the-badge&logo=pytest" alt="Tests"></a>
+  <a href="https://github.com/test-bit-sys/agentbisect/actions"><img src="https://img.shields.io/badge/tests-69%20passed-brightgreen?style=for-the-badge&logo=pytest" alt="Tests"></a>
   <a href="https://github.com/test-bit-sys/agentbisect/stargazers"><img src="https://img.shields.io/github/stars/test-bit-sys/agentbisect?style=for-the-badge&color=yellow" alt="Stars"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?style=for-the-badge" alt="License"></a>
   <a href="https://pypi.org/project/agentbisect/"><img src="https://img.shields.io/badge/pypi-v0.1.0-blueviolet?style=for-the-badge&logo=pypi" alt="PyPI"></a>
