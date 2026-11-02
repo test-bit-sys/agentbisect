@@ -1,0 +1,19 @@
+{
+  "name": "agentbisect",
+  "version": "0.1.0",
+  "description": "Git bisect for AI coding agents. Pinpoint and fork the exact step where an agent broke your codebase.",
+  "author": "AgentBisect Contributors",
+  "homepage": "https://github.com/your-username/agentbisect",
+  "skills": [
+    "skills/agentbisect"
+  ],
+  "mcpServers": {
+    "agentbisect": {
+      "command": "agentbisect",
+      "args": ["mcp"],
+      "env": {
+        "PYTHONUNBUFFERED": "1"
+      }
+    }
+  }
+}
