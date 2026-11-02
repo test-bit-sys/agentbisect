@@ -7,6 +7,7 @@ and recording checkpoints into the Shadow Git Ledger.
 from __future__ import annotations
 
 import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import List, Optional
@@ -30,14 +31,18 @@ class ProcessWrapper:
         Executes command_args in workspace, measures execution, checks for file diffs,
         and records a step in the shadow ledger if changes occurred.
         """
-        cmd_str = " ".join(command_args)
+        cmd_str = " ".join(command_args) if isinstance(command_args, (list, tuple)) else str(command_args)
         summary = step_summary or f"run_command: {cmd_str[:35]}"
+
+        # On POSIX (Linux/macOS), subprocess with shell=True and a sequence argument drops all args after the first.
+        # Use shell=False for argument sequences on POSIX, while retaining shell=True for Windows or string commands.
+        use_shell = (sys.platform == "win32") or isinstance(command_args, str)
 
         start_time = time.time()
         proc = subprocess.run(
             command_args,
             cwd=str(self.workspace_root),
-            shell=True,
+            shell=use_shell,
             capture_output=True,
             text=True,
             encoding="utf-8",

@@ -21,7 +21,11 @@ def test_process_wrapper_records_step(temp_workspace):
 
     # Run a command that touches a file
     test_file = temp_workspace / "wrapped_output.txt"
-    cmd = [sys.executable, "-c", f"open(r'{test_file}', 'w').write('hello from wrapper')"]
+    cmd = [
+        sys.executable,
+        "-c",
+        f"from pathlib import Path; Path('{test_file.as_posix()}').write_text('hello from wrapper', encoding='utf-8')",
+    ]
 
     exit_code = wrapper.run_wrapped(cmd, step_summary="Execute wrapped python script")
     assert exit_code == 0
