@@ -216,15 +216,26 @@ def test_bisect_engine_broken_baseline_when_step_1_errors(temp_workspace):
 
     mock_evaluator = MagicMock()
     mock_evaluator.name = "mock_err"
-    # Mock evaluate: always returns ERROR on step 1 and step 3
+    # Mock evaluate: returns ERROR on step 1 (broken baseline) and FAIL on latest step 3
     def mock_eval(step_number, commit_hash, workspace_root):
+        if step_number == 1:
+            return BisectStepResult(
+                step_number=step_number,
+                commit_hash=commit_hash,
+                status=BisectStatus.ERROR,
+                exit_code=-2,
+                stdout="",
+                stderr="command not found / syntax error in test runner",
+                duration_seconds=0.05,
+                command="bad_command",
+            )
         return BisectStepResult(
             step_number=step_number,
             commit_hash=commit_hash,
-            status=BisectStatus.ERROR,
-            exit_code=-2,
+            status=BisectStatus.FAIL,
+            exit_code=1,
             stdout="",
-            stderr="command not found / syntax error in test runner",
+            stderr="AssertionError",
             duration_seconds=0.05,
             command="bad_command",
         )
@@ -502,3 +513,127 @@ def test_bisect_engine_cache_lifetime_scoped_to_run_and_immutable(temp_workspace
     report2 = engine.run()
     assert len(report2.steps_evaluated) == count_run1, "Steps from run 1 leaked into run 2!"
     assert report2.steps_evaluated[0].stdout == "clean output", "Cached result was mutated by consumer!"
+
+
+def test_bisect_engine_latest_step_error_returns_inconclusive(temp_workspace):
+    """
+    Regression test (Issue #2): When the latest step evaluation returns ERROR,
+    BisectEngine must NOT treat it as a failure and bisect.
+    It must report INCONCLUSIVE with the error diagnostics.
+    """
+    recorder = LiveRecorder(temp_workspace, session_id="latest_error_session")
+    f = temp_workspace / "code.py"
+    f.write_text("x = 1\n", encoding="utf-8")
+    recorder.record_step(tool_name="write_file")
+
+    f.write_text("x = 2\n", encoding="utf-8")
+    recorder.record_step(tool_name="edit_file")
+
+    f.write_text("x = 3\n", encoding="utf-8")
+    recorder.record_step(tool_name="edit_file")
+
+    from unittest.mock import MagicMock
+    from agentbisect.core.models import BisectStepResult, RegressionClassification
+
+    mock_evaluator = MagicMock()
+    mock_evaluator.name = "mock_latest_err"
+
+    def mock_eval(step_number, commit_hash, workspace_root):
+        if step_number == 3:
+            return BisectStepResult(
+                step_number=3,
+                commit_hash=commit_hash,
+                status=BisectStatus.ERROR,
+                exit_code=-2,
+                stdout="",
+                stderr="Infrastructure restore failed on step 3",
+                duration_seconds=0.05,
+                command="test_cmd",
+            )
+        return BisectStepResult(
+            step_number=step_number,
+            commit_hash=commit_hash,
+            status=BisectStatus.PASS,
+            exit_code=0,
+            stdout="OK",
+            stderr="",
+            duration_seconds=0.05,
+            command="test_cmd",
+        )
+
+    mock_evaluator.evaluate.side_effect = mock_eval
+
+    engine = BisectEngine(
+        session=recorder.session,
+        ledger=recorder.ledger,
+        evaluator=mock_evaluator,
+    )
+    report = engine.run()
+    assert report.classification == RegressionClassification.INCONCLUSIVE
+    assert report.first_bad_step is None
+    assert report.last_good_step is None
+    assert report.confidence == 0.0
+    assert any("latest returned ERROR" in d for d in report.diagnostics)
+    assert "failed with ERROR" in report.divergence_reason
+
+
+def test_bisect_engine_latest_step_inconclusive_returns_inconclusive(temp_workspace):
+    """
+    Regression test (Issue #2): When the latest step evaluation returns INCONCLUSIVE (e.g. timeout),
+    BisectEngine must NOT treat it as a failure and bisect.
+    It must report INCONCLUSIVE.
+    """
+    recorder = LiveRecorder(temp_workspace, session_id="latest_inconclusive_session")
+    f = temp_workspace / "code.py"
+    f.write_text("x = 1\n", encoding="utf-8")
+    recorder.record_step(tool_name="write_file")
+
+    f.write_text("x = 2\n", encoding="utf-8")
+    recorder.record_step(tool_name="edit_file")
+
+    f.write_text("x = 3\n", encoding="utf-8")
+    recorder.record_step(tool_name="edit_file")
+
+    from unittest.mock import MagicMock
+    from agentbisect.core.models import BisectStepResult, RegressionClassification
+
+    mock_evaluator = MagicMock()
+    mock_evaluator.name = "mock_latest_inconclusive"
+
+    def mock_eval(step_number, commit_hash, workspace_root):
+        if step_number == 3:
+            return BisectStepResult(
+                step_number=3,
+                commit_hash=commit_hash,
+                status=BisectStatus.INCONCLUSIVE,
+                exit_code=-1,
+                stdout="",
+                stderr="Evaluation timed out after 30s",
+                duration_seconds=30.0,
+                command="test_cmd",
+            )
+        return BisectStepResult(
+            step_number=step_number,
+            commit_hash=commit_hash,
+            status=BisectStatus.PASS,
+            exit_code=0,
+            stdout="OK",
+            stderr="",
+            duration_seconds=0.05,
+            command="test_cmd",
+        )
+
+    mock_evaluator.evaluate.side_effect = mock_eval
+
+    engine = BisectEngine(
+        session=recorder.session,
+        ledger=recorder.ledger,
+        evaluator=mock_evaluator,
+    )
+    report = engine.run()
+    assert report.classification == RegressionClassification.INCONCLUSIVE
+    assert report.first_bad_step is None
+    assert report.last_good_step is None
+    assert report.confidence == 0.0
+    assert any("latest returned INCONCLUSIVE" in d for d in report.diagnostics)
+    assert "INCONCLUSIVE (timed out or unstable)" in report.divergence_reason

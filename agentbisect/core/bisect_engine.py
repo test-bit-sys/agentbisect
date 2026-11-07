@@ -270,6 +270,48 @@ class BisectEngine:
                         confidence=1.0,
                         divergence_reason="Current latest step already PASSES the test. No regression detected.",
                     )
+                elif res_latest.status == BisectStatus.ERROR:
+                    return BisectReport(
+                        session_id=self.session.metadata.session_id,
+                        test_command=self.test_command,
+                        total_steps=total_steps,
+                        first_bad_step=None,
+                        last_good_step=None,
+                        steps_evaluated=self.evaluated_steps,
+                        evaluations_count=len(self.evaluated_steps),
+                        classification=RegressionClassification.INCONCLUSIVE,
+                        confidence=0.0,
+                        diagnostics=[f"Step #{latest_step_num} latest returned ERROR: {res_latest.stderr}"],
+                        divergence_reason=f"Latest step {latest_step_num} failed with ERROR! {res_latest.stderr.strip()}",
+                    )
+                elif res_latest.status == BisectStatus.INCONCLUSIVE:
+                    return BisectReport(
+                        session_id=self.session.metadata.session_id,
+                        test_command=self.test_command,
+                        total_steps=total_steps,
+                        first_bad_step=None,
+                        last_good_step=None,
+                        steps_evaluated=self.evaluated_steps,
+                        evaluations_count=len(self.evaluated_steps),
+                        classification=RegressionClassification.INCONCLUSIVE,
+                        confidence=0.0,
+                        diagnostics=[f"Step #{latest_step_num} latest returned INCONCLUSIVE: {res_latest.stderr}"],
+                        divergence_reason=f"Latest step {latest_step_num} test is INCONCLUSIVE (timed out or unstable): {res_latest.stderr.strip()}",
+                    )
+                elif res_latest.status != BisectStatus.FAIL:
+                    return BisectReport(
+                        session_id=self.session.metadata.session_id,
+                        test_command=self.test_command,
+                        total_steps=total_steps,
+                        first_bad_step=None,
+                        last_good_step=None,
+                        steps_evaluated=self.evaluated_steps,
+                        evaluations_count=len(self.evaluated_steps),
+                        classification=RegressionClassification.INCONCLUSIVE,
+                        confidence=0.0,
+                        diagnostics=[f"Step #{latest_step_num} latest returned {res_latest.status}: {res_latest.stderr}"],
+                        divergence_reason=f"Latest step {latest_step_num} test returned unexpected status {res_latest.status}: {res_latest.stderr.strip()}",
+                    )
 
                 bad_test_result = res_latest
                 first_bad_step = self.session.get_step(latest_step_num)
